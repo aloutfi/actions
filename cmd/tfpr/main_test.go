@@ -1110,3 +1110,14 @@ func TestCommentBudgetTooSmall(t *testing.T) {
 	has(t, "says why", r.out, "TFPR_COMMENT_BUDGET is 100 characters; this comment needs at least")
 	lacks(t, "posts nothing", r.api, "POST")
 }
+
+// A summary over the CI's limit even in the minimal layout is not
+// uploaded, and so not linked.
+func TestOversizedSummaryIsNotUploaded(t *testing.T) {
+	s := newScenario(t)
+	s.byo("changes")
+	r := s.set("TFPR_FILTER", `cat; head -c 2000000 /dev/zero | tr '\0' x`).run("comment")
+	eq(t, "exit code", 0, r.rc)
+	eq(t, "nothing uploaded", "", r.summary)
+	has(t, "warns", r.out, "::warning::Not writing the job summary")
+}

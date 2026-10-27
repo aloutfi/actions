@@ -83,7 +83,8 @@ func userTemplate() (string, error) {
 }
 
 // writeSummary publishes the full filtered plan as the job summary
-// (unless TFPR_SUMMARY=false) and reports whether it did. A redaction
+// (unless TFPR_SUMMARY=false) and reports whether it did; a summary over
+// the CI's limit even in the minimal layout is not written. A redaction
 // failure is returned as is, and nothing is published; any other failure is
 // only logged, since the summary is a convenience.
 func (a *app) writeSummary(r core.PlanResult, texts map[string]string, links core.Links) (bool, error) {
@@ -102,8 +103,13 @@ func (a *app) writeSummary(r core.PlanResult, texts map[string]string, links cor
 		if text, err = a.filter.Apply(raw); err != nil {
 			return false, err
 		}
-		if len(text.String()) <= host.MaxSummary || c.Minimal {
+		if len(text.String()) <= host.MaxSummary {
 			break
+		}
+		if c.Minimal {
+			a.ci.Log(ci.Warning, fmt.Sprintf("Not writing the job summary: even its minimal layout is %d bytes after the filter, over the %d-byte limit.",
+				len(text.String()), host.MaxSummary))
+			return false, nil
 		}
 		c.Minimal = true
 	}
