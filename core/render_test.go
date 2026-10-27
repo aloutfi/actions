@@ -311,3 +311,25 @@ func TestPlainDialect(t *testing.T) {
 		t.Errorf("plain dialect:\n%s", got)
 	}
 }
+
+// A failed plan that overflows still says it failed, why (shortened to
+// fit) and where to look, never a table of zero counts.
+func TestMinimalFailedPlan(t *testing.T) {
+	reason := "terraform plan exited 1: " + strings.Repeat("Error: something long. ", 400)
+	r := NewPlanResult(PlanResult{Target: Target{Stack: "infra", Workspace: "prod"}}, []Unit{FailedUnit(".", intp(1), reason)})
+	got, err := RenderPlan(PlanComment{Result: r, Host: HostFor("github"), Budget: 1500, Links: links})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := utf8.RuneCountInString(got); n > 1500 {
+		t.Errorf("%d characters, over 1,500", n)
+	}
+	for _, want := range []string{"### ❌ Terraform plan · `infra` (`prod`) · Plan failed", "**Plan failed.**", "Reason: `terraform plan exited 1: Error", "[job log](" + links.Job + ")"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "| Add |") {
+		t.Errorf("counts table in a failed plan:\n%s", got)
+	}
+}

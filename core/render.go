@@ -62,7 +62,8 @@ type PlanComment struct {
 	// KeepUnchanged keeps terraform's "# (N unchanged ... hidden)" lines in
 	// the comment. The job summary always keeps them.
 	KeepUnchanged bool
-	// Minimal forces the fallback layout: headline, banner, counts, links.
+	// Minimal forces the fallback layout: headline, banner, counts (or why the
+	// plan failed) and links.
 	Minimal bool
 }
 
@@ -218,11 +219,37 @@ func render(t *template.Template, c PlanComment, l layout) (string, error) {
 	// The fallback: never a comment cut off mid-HTML.
 	v.Banner = Banner{Show: true, Fallback: true, ListComplete: true, Forget: v.Banner.Forget,
 		Redaction: v.Banner.Redaction, Measure: v.Banner.Measure}
-	out, err := execute(bind(templates, c.Host), "minimal", v)
+	t = bind(templates, c.Host)
+	out, err := execute(t, "minimal", v)
+	if err == nil && v.Reason != "" && l.measure.of(out) > l.budget {
+		out, err = shortenReason(t, v, l)
+	}
 	if err == nil && l.measure.of(out) > l.budget {
 		err = fmt.Errorf("the plan comment does not fit in %d %s, even in the minimal layout", l.budget, l.measure)
 	}
 	return StripControlLines(out), err
+}
+
+// shortenReason renders the minimal layout of a failed plan with its
+// reason cut to fit, ending in an ellipsis.
+func shortenReason(t *template.Template, v *PlanView, l layout) (string, error) {
+	full := v.Reason
+	v.Reason = ""
+	out, err := execute(t, "minimal", v)
+	if err != nil {
+		return out, err
+	}
+	// The reason's code span and ellipsis take a few characters more.
+	room := l.budget - l.measure.of(out) - 8
+	for room > 0 {
+		v.Reason = l.measure.cut(full, room) + "…"
+		if out, err = execute(t, "minimal", v); err != nil || l.measure.of(out) <= l.budget {
+			return out, err
+		}
+		room -= l.measure.of(out) - l.budget
+	}
+	v.Reason = ""
+	return execute(t, "minimal", v)
 }
 
 // withUser is the default templates with a user template parsed over them.
