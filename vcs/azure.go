@@ -52,7 +52,11 @@ const (
 	propMarker      = "tfpr.marker"
 	propRecord      = "tfpr.record"
 	propFingerprint = "tfpr.fingerprint"
+	propStatus      = "tfpr.status" // the status tfpr itself last set
 )
+
+// resolutions are the statuses a reviewer resolves a thread with.
+var resolutions = map[string]bool{"fixed": true, "closed": true, "byDesign": true, "wontFix": true}
 
 // ackReply is posted when a plan changes after a reviewer resolved its thread.
 const ackReply = "The plan changed since it was acknowledged. Review the updated plan above and resolve this thread again."
@@ -141,6 +145,9 @@ func (z *Azure) UpsertComment(c Comment) (string, error) {
 		props[propFingerprint] = str(c.Fingerprint)
 	}
 	status, reopened := z.status(c, found)
+	if status != "" {
+		props[propStatus] = str(status)
+	}
 
 	if found == nil {
 		thread := map[string]any{
@@ -176,7 +183,10 @@ func (z *Azure) UpsertComment(c Comment) (string, error) {
 }
 
 // status is the thread status to set ("" leaves it alone), and whether a
-// reviewer's resolution is being undone because the plan changed.
+// reviewer's resolution is being undone because the plan changed. A
+// resolution counts only if a reviewer made it: the thread has a resolution
+// status that tfpr did not set itself (tfpr closes no-op threads; "pending"
+// is no resolution).
 func (z *Azure) status(c Comment, existing *adoThread) (status string, reopened bool) {
 	switch {
 	case c.Resolved:
@@ -186,7 +196,8 @@ func (z *Azure) status(c Comment, existing *adoThread) (status string, reopened 
 	case existing.prop(propFingerprint) == c.Fingerprint:
 		return "", false // unchanged: keep the reviewer's resolution
 	}
-	return "active", existing.Status != "active"
+	acknowledged := resolutions[existing.Status] && existing.Status != existing.prop(propStatus)
+	return "active", acknowledged
 }
 
 func str(s string) typedValue { return typedValue{Type: "System.String", Value: s} }

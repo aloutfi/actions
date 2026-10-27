@@ -70,7 +70,7 @@ func (f *fakeADO) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := len(f.threads) + 100
 		comments := in["comments"].([]any)
 		c := comments[0].(map[string]any)
-		c["id"], c["author"] = 1, map[string]any{"id": f.me}
+		c["id"], c["author"] = float64(1), map[string]any{"id": f.me}
 		in["id"] = id
 		f.threads = append(f.threads, in)
 		reply(in)
@@ -235,6 +235,45 @@ func TestAzureAck(t *testing.T) {
 	_, _ = z.UpsertComment(plan(t, "x", "fp", false))
 	if f.threads[0]["status"] != "active" {
 		t.Errorf("new thread: %v", f.threads[0]["status"])
+	}
+}
+
+// Only a reviewer's resolution counts as acknowledged: not tfpr closing a
+// no-op thread, and not "pending".
+func TestAzureAckOnlyCountsReviewers(t *testing.T) {
+	f := &fakeADO{me: "build-id"}
+	z := newADO(t, f, true)
+	replies := func() int { return len(f.threads[0]["comments"].([]any)) - 1 }
+
+	if _, err := z.UpsertComment(plan(t, "no changes", "fp1", true)); err != nil {
+		t.Fatal(err)
+	}
+	th := f.threads[0]
+	if th["status"] != "closed" || th["properties"].(map[string]any)[propStatus].(map[string]any)["$value"] != "closed" {
+		t.Fatalf("no-op thread: %v", th)
+	}
+	// The plan changes: tfpr closed the thread, nobody acknowledged it.
+	_, _ = z.UpsertComment(plan(t, "changes", "fp2", false))
+	if th["status"] != "active" || replies() != 0 {
+		t.Errorf("after tfpr's own close: status %v, replies %d", th["status"], replies())
+	}
+	// A reviewer resolves it, then the plan changes: reopen and say why.
+	th["status"] = "fixed"
+	_, _ = z.UpsertComment(plan(t, "more changes", "fp3", false))
+	if th["status"] != "active" || replies() != 1 {
+		t.Errorf("after a reviewer's resolution: status %v, replies %d", th["status"], replies())
+	}
+	// "pending" is no resolution.
+	th["status"] = "pending"
+	_, _ = z.UpsertComment(plan(t, "yet more", "fp4", false))
+	if th["status"] != "active" || replies() != 1 {
+		t.Errorf("after pending: status %v, replies %d", th["status"], replies())
+	}
+	// A reviewer closes it (the same word tfpr uses): that is a resolution.
+	th["status"] = "closed"
+	_, _ = z.UpsertComment(plan(t, "and again", "fp5", false))
+	if replies() != 2 {
+		t.Errorf("after a reviewer's close: replies %d", replies())
 	}
 }
 
