@@ -192,3 +192,30 @@ func TestRecordOverflowAppliesAll(t *testing.T) {
 		t.Errorf("len %d: %.200s", len(rec), rec)
 	}
 }
+
+// The record is not filtered, so it carries only identifiers and hashes:
+// never addresses, output names or plan text.
+func TestRecordCarriesNothingSensitive(t *testing.T) {
+	u, _, err := DeriveUnit(UnitInput{Path: ".", PlanText: "secret-in-text",
+		PlanJSON: planDoc(rc(`a.b["secret-key"]`, `["create"]`, ``), `"secret_output":{"actions":["create"]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := Record(NewPlanResult(PlanResult{Target: Target{Stack: "s", Workspace: "w"}}, []Unit{u}))
+	if strings.Contains(rec, "secret") {
+		t.Errorf("record leaks: %s", rec)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(rec, "<!-- tfpr:plan@1 "), " -->")), &fields); err != nil {
+		t.Fatal(err)
+	}
+	allowed := "key sha tree exit status units apply provisional planset fp run attempt"
+	for k := range fields {
+		if !strings.Contains(" "+allowed+" ", " "+k+" ") {
+			t.Errorf("record field %q is not on the allow list", k)
+		}
+	}
+	if len(fields) != len(strings.Fields(allowed)) {
+		t.Errorf("record fields %v", fields)
+	}
+}

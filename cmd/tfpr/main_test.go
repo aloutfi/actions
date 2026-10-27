@@ -711,7 +711,7 @@ func TestCommentFilterFailurePostsNothing(t *testing.T) {
 }
 
 func TestApplyCommentFilterFailure(t *testing.T) {
-	s := newScenario(t).set("TFPR_FILTER", `in=$(cat); case "$in" in *tf-apply*) exit 1;; esac; printf '%s\n' "$in"`)
+	s := newScenario(t).set("TFPR_FILTER", `in=$(cat); case "$in" in *"Terraform Apply"*) exit 1;; esac; printf '%s\n' "$in"`)
 	r := s.run("apply")
 	eq(t, "exit code", 1, r.rc)
 	has(t, "says why", r.out, "nothing was posted")
@@ -841,6 +841,25 @@ func TestEchoedContentIsInert(t *testing.T) {
 	eq(t, "plan: exit code", 0, r.rc)
 	eq(t, "terraform's command line is inside a stopped region", true, insideStopped(r.out, "::warning::from terraform"))
 
+}
+
+// The filter sees only the human-readable body. A filter that rewrites the
+// stack name leaves the marker and record intact, so the comment is updated,
+// not duplicated.
+func TestFilterNeverTouchesMarkerOrRecord(t *testing.T) {
+	s := newScenario(t).set("TFPR_STACK", "prod/", "TFPR_FILTER", "sed s/prod/X/g")
+	must(t, os.MkdirAll(filepath.Join(s.ws, "prod"), 0o755))
+	s.byo("no-changes")
+	s.gh.comments = `[{"id":6,"user":{"login":"github-actions[bot]"},"body":"<!-- tf-plan:prod :: default -->\nold"}]`
+	r := s.set("GITHUB_EVENT_NAME", "pull_request").run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "updates", r.api, "PATCH /repos/o/r/issues/comments/6")
+	lacks(t, "does not duplicate", r.api, "POST")
+	lines := strings.SplitN(r.body, "\n", 3)
+	eq(t, "marker unfiltered", "<!-- tf-plan:prod :: default -->", lines[0])
+	has(t, "record unfiltered", lines[1], `"key":"prod:default"`)
+	has(t, "body filtered", lines[2], "<code>X</code>")
+	lacks(t, "body filtered", lines[2], "prod")
 }
 
 // render's stdout is data: exactly the body, which has no command lines.

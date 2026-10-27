@@ -17,10 +17,12 @@ type PR struct {
 // VCS is the repo-host port. Identity scoping (whose comments may be
 // edited) lives inside the adapter.
 type VCS interface {
-	// UpsertComment updates the adapter's own comment on pr whose body starts
-	// with marker, or posts a new one. It returns a line describing what it did.
-	// The body must have been through the redaction filter (redact.Text).
-	UpsertComment(pr, marker string, body redact.Text) (string, error)
+	// UpsertComment updates the adapter's own comment on pr that starts with
+	// marker, or posts a new one. It returns a line describing what it did.
+	// marker and record ("" for none) are tfpr's own control lines and are
+	// never filtered; body must have been through the redaction filter
+	// (redact.Text). Hosts that can store the record out of band may do so.
+	UpsertComment(pr, marker, record string, body redact.Text) (string, error)
 	// PRsForCommit lists the PRs associated with sha, such as the PR that merged it.
 	PRsForCommit(sha string) ([]PR, error)
 	// BranchHead is the current head commit of branch (short name).

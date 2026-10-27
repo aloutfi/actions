@@ -12,7 +12,7 @@ import (
 type NoPR struct{}
 
 // UpsertComment skips the comment.
-func (NoPR) UpsertComment(pr, _ string, _ redact.Text) (string, error) {
+func (NoPR) UpsertComment(pr, _, _ string, _ redact.Text) (string, error) {
 	return "No repository host configured; skipping the comment on PR #" + pr + ".", nil
 }
 

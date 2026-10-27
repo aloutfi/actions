@@ -91,7 +91,14 @@ text on stdin and writes the redacted text on stdout. tfpr runs it with
 - the plan text it stores in the plan dir;
 - the resource addresses and output names it copies from `plan.json` into
   `plan-result.json` (for_each keys can be sensitive);
-- every comment body it posts, and `tfpr render`'s output.
+- the human-readable body of every comment it posts, and of `tfpr render`'s
+  output.
+
+The first two lines of a comment are tfpr's own and are never filtered:
+the marker that finds the comment again (`<!-- tf-plan:<stack> :: <workspace> -->`)
+and the record. They carry only the stack, the workspace, the commit and tree
+ids, unit paths, statuses and hashes. Plan text can't forge them: lines that
+look like a marker or record are removed from the body.
 
 It fails closed. A non-zero exit, a two-minute timeout, or empty output for
 non-empty input fails the command, and nothing is posted. Filters must be

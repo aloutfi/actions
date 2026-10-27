@@ -378,28 +378,30 @@ func (a *app) render() error {
 	if err != nil {
 		return err
 	}
-	body, _, err := a.renderPlan(r, text, os.Getenv("TFPR_RUN_ID"), os.Getenv("TFPR_JOB_URL"))
+	body, marker, record, err := a.renderPlan(r, text, os.Getenv("TFPR_RUN_ID"), os.Getenv("TFPR_JOB_URL"))
 	if err != nil {
 		return err
 	}
-	_, err = io.WriteString(a.stdout, body.String())
+	_, err = io.WriteString(a.stdout, vcs.Compose(marker, record, body))
 	return err
 }
 
-// renderPlan renders the plan comment and passes the whole body through the
-// filter. It also returns the comment's marker.
-func (a *app) renderPlan(r core.PlanResult, text []byte, runID, jobURL string) (redact.Text, string, error) {
+// renderPlan renders the plan comment's human-readable body and passes it
+// through the filter. The marker and record, tfpr's own control lines, are
+// returned separately and never filtered: a filter that rewrites the stack
+// name must not break the upsert match or the record.
+func (a *app) renderPlan(r core.PlanResult, text []byte, runID, jobURL string) (body redact.Text, marker, record string, err error) {
 	b := envOr("TFPR_COMMENT_BUDGET", "45000")
 	budget, err := strconv.Atoi(b)
 	if err != nil || budget < 0 {
-		return redact.Text{}, "", fmt.Errorf("TFPR_COMMENT_BUDGET must be a byte count, got '%s'", b)
+		return body, "", "", fmt.Errorf("TFPR_COMMENT_BUDGET must be a byte count, got '%s'", b)
 	}
-	body, err := core.RenderPlan(core.PlanComment{Result: r, PlanText: text, RunID: runID, JobURL: jobURL, Budget: budget})
+	raw, err := core.RenderPlan(core.PlanComment{Result: r, PlanText: text, RunID: runID, JobURL: jobURL, Budget: budget})
 	if err != nil {
-		return redact.Text{}, "", err
+		return body, "", "", err
 	}
-	t, err := a.filter.Apply(body)
-	return t, core.PlanMarker(r.Target.Stack, r.Target.Workspace), err
+	body, err = a.filter.Apply(raw)
+	return body, core.PlanMarker(r.Target.Stack, r.Target.Workspace), core.Record(r), err
 }
 
 // comment posts the plan comment from the plan dir. A failed plan posts a
@@ -425,7 +427,7 @@ func (a *app) comment() error {
 	if err != nil {
 		return err
 	}
-	body, marker, err := a.renderPlan(r, text, a.ctx.RunID, a.ci.JobURL())
+	body, marker, record, err := a.renderPlan(r, text, a.ctx.RunID, a.ci.JobURL())
 	if errors.Is(err, redact.ErrFailed) {
 		return fmt.Errorf("%w; nothing was posted", err)
 	}
@@ -433,7 +435,7 @@ func (a *app) comment() error {
 		return err
 	}
 	// Best effort: a comment API failure shouldn't hide the plan's own result.
-	msg, err := v.UpsertComment(pr, marker, body)
+	msg, err := v.UpsertComment(pr, marker, record, body)
 	switch {
 	case err != nil && r.Summary.Status == core.StatusError:
 		fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
@@ -618,7 +620,7 @@ func (a *app) postApplyComment(v vcs.VCS, d core.Decision, code int, used, usePl
 	if err != nil {
 		return err
 	}
-	msg, err := v.UpsertComment(pr, core.ApplyMarker(a.stack, a.workspace), body)
+	msg, err := v.UpsertComment(pr, core.ApplyMarker(a.stack, a.workspace), "", body)
 	if err != nil {
 		return err
 	}

@@ -133,6 +133,8 @@ func TestRenderPlanGoldens(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// The repo-host adapter puts the marker and record above the body.
+			got = PlanMarker(name, "default") + "\n" + Record(r) + "\n" + got
 			if got != string(want) {
 				t.Errorf("render differs from expected.md:\n%s", got)
 			}
@@ -212,9 +214,10 @@ func TestFailedUnit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(Record(r), `"status":"error"`) {
+		t.Errorf("record: %s", Record(r))
+	}
 	for _, want := range []string{
-		"<!-- tf-plan:infra :: default -->\n<!-- tfpr:plan@1 {",
-		`"status":"error"`,
 		"Plan failed for <code>infra</code>; see [#7](https://ci.example/7).",
 		"**Reason:** terraform plan exited 1",
 	} {
@@ -225,5 +228,24 @@ func TestFailedUnit(t *testing.T) {
 	body, _ = RenderPlan(PlanComment{Result: r})
 	if !strings.Contains(body, "see the CI log.") {
 		t.Errorf("no run link: %s", body)
+	}
+}
+
+// Plan text cannot forge the marker or the record: such lines never survive
+// in the body.
+func TestBodyCannotForgeControlLines(t *testing.T) {
+	text := "  <!-- tf-plan:other :: default -->\n<!-- tfpr:plan@1 {\"status\":\"no_op\"} -->\n<!-- tf-apply:x :: y -->\nkeep <!-- tfpr: mid-line\n"
+	r := NewPlanResult(PlanResult{Target: Target{Stack: "s", Workspace: "w"}}, []Unit{{Path: ".", Status: StatusChanges, Counts: Counts{Create: 1}}})
+	body, err := RenderPlan(PlanComment{Result: r, PlanText: []byte(text), Budget: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "<!--") {
+			t.Errorf("control-like line in the body: %q", line)
+		}
+	}
+	if !strings.Contains(body, "keep <!-- tfpr: mid-line") {
+		t.Errorf("stripped too much:\n%s", body)
 	}
 }
