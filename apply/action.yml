@@ -75,6 +75,7 @@ runs:
         TFPR_STACK: ${{ inputs.stack }}
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
+        TFPR_PLAN_DIR: ${{ runner.temp }}/tfpr-plan-artifact
       run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" decide'
 
     - name: Download plan artifact
@@ -84,7 +85,8 @@ runs:
       uses: actions/download-artifact@v7
       with:
         name: ${{ steps.decide.outputs.artifact_name }}
-        path: ${{ inputs.stack }}
+        # Not the stack directory: only this download may supply the reviewed plan.
+        path: ${{ runner.temp }}/tfpr-plan-artifact
         run-id: ${{ inputs.plan_artifact_run_id || github.run_id }}
         # Cross-run downloads need github-token; without it the action looks
         # only at the current run and reports "not found".
@@ -98,6 +100,7 @@ runs:
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
         TFPR_ALLOW_FRESH_PLAN_FALLBACK: ${{ inputs.allow_fresh_plan_fallback }}
+        TFPR_PLAN_DIR: ${{ runner.temp }}/tfpr-plan-artifact
         TFPR_PLAN_RUN_ID: ${{ inputs.plan_artifact_run_id }}
         TFPR_LOCK_TIMEOUT: ${{ inputs.lock_timeout }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}

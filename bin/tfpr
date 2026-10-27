@@ -20,6 +20,8 @@
 #   TFPR_COMMENT_AUTHOR             comment/apply: login allowed to own the comment
 #   TFPR_USE_PLANFILE               decide/apply: apply the stored planfile (false)
 #   TFPR_ALLOW_FRESH_PLAN_FALLBACK  apply: fresh-plan if the planfile is missing (false)
+#   TFPR_PLAN_DIR                   decide/apply: directory the planfile artifact is
+#                                   downloaded into; decide empties it first
 #   TFPR_PLAN_RUN_ID                apply: run that produced the planfile (comment only)
 #   TFPR_LOCK_TIMEOUT               apply: -lock-timeout (5m)
 #   TFPR_PLAN_WORKFLOW              resolve-plan-run: plan workflow file name
@@ -279,6 +281,8 @@ cmd_comment() {
 cmd_decide() {
   load_ci
   local source download=false
+  # Start empty so apply only ever sees what this download put there.
+  [[ -z "${TFPR_PLAN_DIR:-}" ]] || rm -rf "${TFPR_PLAN_DIR}"
   read -r source _ <<< "$(decide_plan_source "${TFPR_USE_PLANFILE:-false}" "$(ci_attempt)" true false)"
   [[ "${source}" == "planfile" ]] && download=true
   ci_output download "${download}"
@@ -310,10 +314,26 @@ terraform_version() { terraform version -json 2> /dev/null | jq -r .terraform_ve
 
 # terraform_apply planfile|fresh. Runs in a subshell so the first failure's
 # exit code propagates even when called from an `||` context.
+# reviewed_planfile: succeeds if TFPR_PLAN_DIR holds a downloaded planfile
+# whose plan-metadata.json is for this stack and workspace. A tfplan already
+# in the stack directory (say, from an earlier plan in the same job) never
+# counts as the reviewed plan.
+reviewed_planfile() {
+  local dir="${TFPR_PLAN_DIR:-}"
+  [[ -n "${dir}" && -f "${dir}/tfplan" ]] || return 1
+  if ! jq -e --arg stack "${TFPR_STACK}" --arg ws "${TFPR_WORKSPACE}" \
+    '.stack == $stack and .workspace == $ws' "${dir}/plan-metadata.json" > /dev/null 2>&1; then
+    ci_warn "Ignoring the planfile artifact: its plan-metadata.json is missing or is not for stack '${TFPR_STACK}' workspace '${TFPR_WORKSPACE}'."
+    return 1
+  fi
+}
+
 terraform_apply() {
   local args=(-input=false -no-color "-lock-timeout=${TFPR_LOCK_TIMEOUT:-5m}")
   if [[ "$1" == "planfile" ]]; then
-    # The reviewed planfile encodes intent; no -auto-approve needed.
+    # The reviewed planfile encodes intent; no -auto-approve needed. Copy it
+    # over whatever tfplan the stack directory holds.
+    cp "${TFPR_PLAN_DIR}/tfplan" "${TFPR_STACK}/tfplan" || return 1
     args+=(tfplan)
   else
     args+=(-auto-approve)
@@ -337,7 +357,7 @@ cmd_apply() {
     reason="stale-rerun"
     code=1
   else
-    [[ -f "${TFPR_STACK}/tfplan" ]] && has_planfile=true
+    reviewed_planfile && has_planfile=true
     read -r source reason <<< "$(decide_plan_source "${use_planfile}" "${attempt}" "${has_planfile}" "${allow}")"
     case "${source}:${reason}" in
       fresh:rerun)

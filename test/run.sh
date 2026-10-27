@@ -168,6 +168,59 @@ assert_has "missing artifact: names retention input" "${OUT}" "retention_days"
 assert_has "missing artifact: names fallback input" "${OUT}" "allow_fresh_plan_fallback=true"
 assert_lacks "missing artifact: no apply" "${CALLS}" "terraform apply"
 
+# Planfile provenance: only a downloaded planfile for this stack/workspace counts.
+# plan_artifact STACK WORKSPACE: fake a downloaded artifact in ${ws}/artifact.
+plan_artifact() {
+  mkdir -p "${ws}/artifact"
+  echo "reviewed plan" > "${ws}/artifact/tfplan"
+  jq -n --arg stack "$1" --arg workspace "$2" '{$stack, $workspace}' > "${ws}/artifact/plan-metadata.json"
+}
+
+new_ws
+echo "local plan" > "${ws}/stack/tfplan"
+run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact
+assert_eq "stack tfplan without artifact: fails closed" 1 "${RC}"
+assert_lacks "stack tfplan without artifact: no apply" "${CALLS}" "terraform apply"
+
+new_ws
+echo "local plan" > "${ws}/stack/tfplan"
+plan_artifact stack default
+run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact
+assert_eq "matching artifact: exit code" 0 "${RC}"
+assert_has "matching artifact: applies planfile" "${CALLS}" "terraform apply -input=false -no-color -lock-timeout=5m tfplan"
+assert_lacks "matching artifact: no -auto-approve" "${CALLS}" "-auto-approve"
+assert_eq "matching artifact: reviewed plan copied over local one" "reviewed plan" "$(cat "${ws}/stack/tfplan")"
+assert_has "matching artifact: output" "${OUTPUTS}" "used_plan_artifact=true"
+
+new_ws
+plan_artifact other-stack default
+run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact
+assert_eq "artifact for another stack: fails closed" 1 "${RC}"
+assert_has "artifact for another stack: warns" "${OUT}" "Ignoring the planfile artifact"
+assert_lacks "artifact for another stack: no apply" "${CALLS}" "terraform apply"
+
+new_ws
+plan_artifact stack prod
+run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact
+assert_eq "artifact for another workspace: fails closed" 1 "${RC}"
+
+new_ws
+plan_artifact stack default
+rm "${ws}/artifact/plan-metadata.json"
+run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact
+assert_eq "artifact without metadata: fails closed" 1 "${RC}"
+
+new_ws
+echo "local plan" > "${ws}/stack/tfplan"
+run_tfpr apply
+assert_has "use_planfile=false ignores stack tfplan" "${CALLS}" "-lock-timeout=5m -auto-approve"
+
+new_ws
+plan_artifact stack default
+run_tfpr decide TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact
+assert_eq "decide empties the artifact dir" "absent" "$([[ -e "${ws}/artifact" ]] && echo present || echo absent)"
+assert_has "decide requests download" "${OUTPUTS}" "download=true"
+
 # --- action wrappers (static checks) ----------------------------------------
 # assert_yaml NAME FILE LINE: FILE contains LINE (whitespace-trimmed) verbatim.
 # LINE is literal GitHub expression text, so callers single-quote it.
@@ -184,6 +237,10 @@ assert_yaml "plan artifact retention is an input" plan/action.yml \
   'retention-days: ${{ inputs.retention_days }}'
 assert_eq "plan retention_days default" 'default: "7"' \
   "$(grep -A6 '^  retention_days:' "${root}/plan/action.yml" | grep -m1 'default:' | sed 's/^ *//')"
+
+# shellcheck disable=SC2016
+assert_yaml "apply downloads outside the stack" apply/action.yml \
+  'path: ${{ runner.temp }}/tfpr-plan-artifact'
 
 echo "${passes} passed, ${failures} failed"
 [[ "${failures}" -eq 0 ]]

@@ -107,9 +107,13 @@ How apply chooses what to run:
 | Case | Result |
 |---|---|
 | `use_planfile: false` | Fresh plan, `-auto-approve` |
-| First attempt, planfile present | Apply the planfile |
-| First attempt, planfile missing | **Fail**, or a fresh plan with `allow_fresh_plan_fallback: true` |
+| First attempt, planfile downloaded for this stack and workspace | Apply the planfile |
+| First attempt, planfile missing or for another stack/workspace | **Fail**, or a fresh plan with `allow_fresh_plan_fallback: true` |
 | Re-run (attempt > 1) | Fresh plan, only if the commit is still the head of its branch. Re-runs on tags, PR refs, or superseded commits are refused. |
+
+The planfile is downloaded outside the checkout, and its `plan-metadata.json`
+must name the same `stack` and `workspace` strings as the apply. A `tfplan`
+already in the stack directory is never treated as the reviewed plan.
 
 A fresh apply on a re-run of an older commit would apply a superseded tree and
 roll back everything merged since. The head check prevents that.
