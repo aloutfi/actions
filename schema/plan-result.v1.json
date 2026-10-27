@@ -34,8 +34,9 @@
       "required": ["sha", "tree"],
       "properties": {
         "repo": { "type": "string" },
-        "sha": { "type": "string", "description": "commit planned; empty when the CI did not say" },
+        "sha": { "type": "string", "description": "the commit checked out and planned; on PR builds the merge commit (GITHUB_SHA, Build.SourceVersion); empty when the CI did not say" },
         "tree": { "type": "string", "description": "git rev-parse <sha>^{tree}; empty when unknown" },
+        "head_sha": { "type": "string", "description": "PR builds: the PR's head commit (the event's pull_request.head.sha, System.PullRequest.SourceCommitId); empty otherwise" },
         "ref": { "type": "string" },
         "pr": { "type": ["string", "null"] }
       }

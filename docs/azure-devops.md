@@ -157,8 +157,10 @@ on the comment layout:
 - The comment size limit, reportedly about 150,000 characters. The default
   `TFPR_COMMENT_BUDGET` (45,000) stays well under it.
 - The size limit of `task.uploadsummary`.
-- Which of `System.PullRequest.SourceCommitId` and `Build.SourceVersion` is
-  the commit you expect. tfpr plans the first (the PR head) and logs both.
+- Which commits a PR build sees. tfpr records the checked-out commit,
+  `Build.SourceVersion` (the merge commit), as `source.sha`, and the PR head,
+  `System.PullRequest.SourceCommitId`, as `source.head_sha`. This matches
+  GitHub Actions, where `GITHUB_SHA` is the merge commit. It logs both.
 
 ## Why no step template
 

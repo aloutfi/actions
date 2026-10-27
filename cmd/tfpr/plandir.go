@@ -164,7 +164,7 @@ func (a *app) writePlanDir(unit core.Unit, text *redact.Text, tool core.Tool, mo
 	r := core.NewPlanResult(core.PlanResult{
 		Tool:      tool,
 		Target:    core.Target{Stack: a.stack, Workspace: a.workspace},
-		Source:    core.Source{Repo: a.repo(), SHA: a.ctx.SHA, Tree: gitTree(a.ctx.SHA), Ref: a.ctx.Ref, PR: pr},
+		Source:    core.Source{Repo: a.repo(), SHA: a.ctx.SHA, Tree: gitTree(a.ctx.SHA), HeadSHA: a.ctx.HeadSHA, Ref: a.ctx.Ref, PR: pr},
 		Run:       core.Run{CI: a.ctx.CI, ID: a.ctx.RunID, Attempt: a.ctx.Attempt, URL: a.ctx.RunURL},
 		Redaction: core.Redaction{Mode: mode},
 	}, []core.Unit{unit})

@@ -50,17 +50,19 @@ func TestAzureContext(t *testing.T) {
 	for name, want := range map[string]Ctx{
 		"azure-pr-tfsgit": {
 			CI: "azure", RunID: "812",
-			RunURL: "https://dev.azure.example/org/Platform%20Team/_build/results?buildId=812",
-			SHA:    "abcabcabcabcabcabcabcabcabcabcabcabcabca", // the PR head, not the merge commit
-			Ref:    "refs/pull/7/merge", PR: "7", Actor: "Example Person", Attempt: 1,
+			RunURL:  "https://dev.azure.example/org/Platform%20Team/_build/results?buildId=812",
+			SHA:     "feedfeedfeedfeedfeedfeedfeedfeedfeedfeed", // the merge commit checked out
+			HeadSHA: "abcabcabcabcabcabcabcabcabcabcabcabcabca", // the PR head
+			Ref:     "refs/pull/7/merge", PR: "7", Actor: "Example Person", Attempt: 1,
 			Repo: "99999999-8888-7777-6666-555555555555/11111111-2222-3333-4444-555555555555",
 			VCS:  "azure", VCSURL: "https://dev.azure.example/org/",
 		},
 		"azure-pr-github": {
 			CI: "azure", RunID: "813",
-			RunURL: "https://dev.azure.example/org/proj/_build/results?buildId=813",
-			SHA:    "abcabcabcabcabcabcabcabcabcabcabcabcabca",
-			Ref:    "refs/pull/42/merge", PR: "42", Attempt: 2, // GitHub's number, not Azure's id
+			RunURL:  "https://dev.azure.example/org/proj/_build/results?buildId=813",
+			SHA:     "feedfeedfeedfeedfeedfeedfeedfeedfeedfeed",
+			HeadSHA: "abcabcabcabcabcabcabcabcabcabcabcabcabca",
+			Ref:     "refs/pull/42/merge", PR: "42", Attempt: 2, // GitHub's number, not Azure's id
 			Repo: "o/r", VCS: "github",
 		},
 		"azure-main-tfsgit": {

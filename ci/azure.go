@@ -25,19 +25,20 @@ type Azure struct {
 
 func newAzure(env Env, stdout, stderr io.Writer, _ *vcs.Client) CI {
 	a := &Azure{env: env, out: stdout}
-	// Which commit a PR build should plan is an open verification item: log
-	// both candidates. stderr, because some commands' stdout is data.
+	// Which commits a PR build sees is an open verification item: log both.
+	// stderr, because some commands' stdout is data.
 	if head, merge := env("SYSTEM_PULLREQUEST_SOURCECOMMITID"), env("BUILD_SOURCEVERSION"); head != "" {
-		fmt.Fprintf(stderr, "tfpr: Azure Pipelines PR build: using the PR head System.PullRequest.SourceCommitId=%s (Build.SourceVersion=%s is the merge commit).\n",
-			neutralize(head), neutralize(merge))
+		fmt.Fprintf(stderr, "tfpr: Azure Pipelines PR build: planned commit Build.SourceVersion=%s (the merge commit checked out); PR head System.PullRequest.SourceCommitId=%s.\n",
+			neutralize(merge), neutralize(head))
 	}
 	return a
 }
 
 // Context reads the run from the Azure Pipelines environment.
 //
-// On PR builds Build.SourceVersion is the merge commit, so SHA is the PR
-// head, System.PullRequest.SourceCommitId. The repo host follows
+// SHA is the commit checked out and built, Build.SourceVersion (on PR
+// builds, the merge commit), as on GitHub Actions; HeadSHA is the PR head,
+// System.PullRequest.SourceCommitId. The repo host follows
 // Build.Repository.Provider: Azure Repos (TfsGit) or GitHub.
 func (a *Azure) Context() Ctx {
 	e := a.env
@@ -51,9 +52,7 @@ func (a *Azure) Context() Ctx {
 		Actor:   e("BUILD_REQUESTEDFOR"),
 		Attempt: attempt,
 	}
-	if head := e("SYSTEM_PULLREQUEST_SOURCECOMMITID"); head != "" {
-		c.SHA = head
-	}
+	c.HeadSHA = e("SYSTEM_PULLREQUEST_SOURCECOMMITID")
 	switch e("BUILD_REPOSITORY_PROVIDER") {
 	case "TfsGit":
 		c.VCS, c.VCSURL = "azure", e("SYSTEM_COLLECTIONURI")

@@ -136,7 +136,7 @@ func newScenario(t *testing.T) *scenario {
 	stub := filepath.Join(dir, "terraform")
 	must(t, os.WriteFile(stub, []byte(stubTerraform), 0o755))
 	event := filepath.Join(dir, "event.json")
-	must(t, os.WriteFile(event, []byte(`{"pull_request":{"number":42}}`), 0o644))
+	must(t, os.WriteFile(event, []byte(`{"pull_request":{"number":42,"head":{"sha":"prhead"}}}`), 0o644))
 	gh := &fakeGitHub{t: t, pr: "42", branchHead: "abc", comments: `[]`}
 	srv := httptest.NewServer(gh)
 	t.Cleanup(srv.Close)
@@ -1042,7 +1042,8 @@ func TestAzurePipelinesWithGitHubRepo(t *testing.T) {
 	has(t, "second run updates again", r.api, "PATCH /repos/o/r/issues/comments/6")
 	eq(t, "with the GitHub token", "Bearer gh-token", s.gh.auth)
 	has(t, "links the Azure run", r.body, "https://dev.azure.example/org/proj/_build/results?buildId=812")
-	has(t, "records the PR head", r.body, `"sha":"abc"`)
+	has(t, "records the planned (merge) commit", r.body, `"sha":"mergecommit"`)
+	has(t, "and the PR head", s.planResult(), `"head_sha": "abc"`)
 }
 
 // A GitHub Enterprise repo on Azure Pipelines never falls back to the public
@@ -1154,6 +1155,23 @@ func TestUnknownCommentAuthorFails(t *testing.T) {
 	r = s.run("comment")
 	eq(t, "with the author: exit code", 0, r.rc)
 	eq(t, "with the author: no second lookup", 1, strings.Count(r.api, "GET /user"))
+}
+
+// Both CIs record the commit that was checked out and planned (the merge
+// commit on PR builds) as source.sha, and the PR head as source.head_sha.
+func TestPlannedCommitAndPRHead(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request")
+	s.byo("no-changes")
+	res := s.planResult()
+	has(t, "GitHub: planned commit", res, `"sha": "abc"`)
+	has(t, "GitHub: PR head", res, `"head_sha": "prhead"`)
+
+	s = newScenario(t)
+	s.azure("TfsGit").set("SYSTEM_COLLECTIONURI", "https://dev.azure.example/org/")
+	s.byo("no-changes")
+	res = s.planResult()
+	has(t, "Azure: planned commit", res, `"sha": "mergecommit"`)
+	has(t, "Azure: PR head", res, `"head_sha": "abc"`)
 }
 
 func TestUsage(t *testing.T) {

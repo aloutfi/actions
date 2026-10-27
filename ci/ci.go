@@ -23,7 +23,8 @@ const (
 type Ctx struct {
 	CI            string // adapter name: github, azure, local
 	RunID, RunURL string
-	SHA           string // commit being built
+	SHA           string // the commit checked out and built (on PR builds, the merge commit)
+	HeadSHA       string // PR builds: the PR's head commit
 	Ref           string // full ref, e.g. refs/heads/main
 	PR            string // PR number for pull-request builds, else ""
 	Repo          string // repo id the VCS adapter understands

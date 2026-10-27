@@ -62,11 +62,12 @@ type Target struct {
 
 // Source is the commit that was planned.
 type Source struct {
-	Repo string  `json:"repo,omitempty"`
-	SHA  string  `json:"sha"`
-	Tree string  `json:"tree"` // git tree of SHA; "" when unknown
-	Ref  string  `json:"ref,omitempty"`
-	PR   *string `json:"pr"`
+	Repo    string  `json:"repo,omitempty"`
+	SHA     string  `json:"sha"`      // the commit checked out and planned (on PR builds, the merge commit)
+	Tree    string  `json:"tree"`     // git tree of SHA; "" when unknown
+	HeadSHA string  `json:"head_sha"` // PR builds: the PR's head commit; "" otherwise
+	Ref     string  `json:"ref,omitempty"`
+	PR      *string `json:"pr"`
 }
 
 // Run is the CI run that planned.
