@@ -114,5 +114,5 @@ runs:
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_EXIT_CODE: ${{ steps.plan.outputs.exit_code }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
-        GH_TOKEN: ${{ inputs.token }}
+        TFPR_GITHUB_TOKEN: ${{ inputs.token }}
       run: '"${TFPR}" comment'

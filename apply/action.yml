@@ -126,5 +126,5 @@ runs:
         TFPR_PLAN_RUN_ID: ${{ inputs.plan_artifact_run_id }}
         TFPR_LOCK_TIMEOUT: ${{ inputs.lock_timeout }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
-        GH_TOKEN: ${{ inputs.token }}
+        TFPR_GITHUB_TOKEN: ${{ inputs.token }}
       run: '"${TFPR}" apply'

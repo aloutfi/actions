@@ -28,12 +28,14 @@ type fakeGitHub struct {
 	mu    sync.Mutex
 	calls []string
 	body  string
+	auth  string // last Authorization header
 }
 
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, r.Method+" "+r.URL.RequestURI())
+	f.auth = r.Header.Get("Authorization")
 	p := r.URL.Path
 	switch {
 	case r.Method == http.MethodPost || r.Method == http.MethodPatch:
@@ -71,11 +73,13 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// stubTerraform logs each call to $FAKE_LOG; plan and apply exit with
-// $FAKE_TF_PLAN_CODE and $FAKE_TF_APPLY_CODE; show prints the plan from
-// $FAKE_TF_PLAN (a fixture directory).
+// stubTerraform logs each call to $FAKE_LOG and its environment to
+// $FAKE_LOG.env; plan and apply exit with $FAKE_TF_PLAN_CODE and
+// $FAKE_TF_APPLY_CODE; show prints the plan from $FAKE_TF_PLAN (a fixture
+// directory).
 const stubTerraform = `#!/bin/sh
 echo "terraform $*" >> "$FAKE_LOG"
+env > "$FAKE_LOG.env"
 case "$1" in
   version) echo '{"terraform_version":"0.0.0"}' ;;
   plan) exit "${FAKE_TF_PLAN_CODE:-0}" ;;
@@ -129,7 +133,7 @@ func newScenario(t *testing.T) *scenario {
 		"TFPR_STACK": "stack", "TFPR_WORKSPACE": "default",
 	}
 	// Anything the host CI sets must not leak in.
-	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN", "TFPR_EXIT_CODE", "TFPR_RUN_ID", "TFPR_JOB_URL",
+	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN", "TFPR_GITHUB_TOKEN", "TFPR_EXIT_CODE", "TFPR_RUN_ID", "TFPR_JOB_URL",
 		"TFPR_COMMENT_BUDGET", "TFPR_COMMENT_AUTHOR", "TFPR_USE_PLANFILE", "TFPR_ALLOW_FRESH_PLAN_FALLBACK",
 		"TFPR_PLAN_DIR", "TFPR_PLAN_RUN_ID", "TFPR_LOCK_TIMEOUT", "TFPR_PLAN_WORKFLOW", "TFPR_VCS",
 		"TFPR_REPO", "TFPR_OUTPUT_FILE", "FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE"} {
@@ -498,6 +502,23 @@ func TestLocal(t *testing.T) {
 
 	r = newScenario(t).set("GITHUB_ACTIONS", "", "TFPR_PLAN_WORKFLOW", "pr.yaml").run("resolve-plan-run")
 	eq(t, "resolve-plan-run needs GitHub", 1, r.rc)
+}
+
+// The API token the actions pass never reaches terraform; a GITHUB_TOKEN the
+// caller sets for the GitHub provider does.
+func TestTokenIsolation(t *testing.T) {
+	s := newScenario(t).set("TFPR_GITHUB_TOKEN", "api-token", "GITHUB_TOKEN", "provider-token")
+	r := s.run("apply")
+	eq(t, "exit code", 0, r.rc)
+	eq(t, "API auth", "Bearer api-token", s.gh.auth)
+	env, err := os.ReadFile(s.env["FAKE_LOG"] + ".env")
+	must(t, err)
+	lacks(t, "terraform env", string(env), "TFPR_")
+	has(t, "terraform env", string(env), "GITHUB_TOKEN=provider-token")
+
+	s = newScenario(t).set("GH_TOKEN", "gh-token")
+	s.run("apply")
+	eq(t, "GH_TOKEN fallback", "Bearer gh-token", s.gh.auth)
 }
 
 func TestUsage(t *testing.T) {

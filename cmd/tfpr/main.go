@@ -31,8 +31,11 @@
 //	TFPR_REPO                       repo id for the repo host (the CI's repository)
 //	TFPR_OUTPUT_FILE                step-output file outside a supported CI (stdout)
 //
-// The GitHub adapters authenticate with GH_TOKEN (or GITHUB_TOKEN) against
-// GITHUB_API_URL (https://api.github.com).
+// The GitHub adapters authenticate with TFPR_GITHUB_TOKEN (outside the
+// actions: GH_TOKEN or GITHUB_TOKEN) against GITHUB_API_URL
+// (https://api.github.com). terraform never sees any TFPR_* variable, so the
+// token the actions pass stays out of it; a GITHUB_TOKEN the caller sets for
+// the GitHub provider still reaches it.
 package main
 
 import (
@@ -45,6 +48,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aloutfi/actions/ci"
@@ -74,7 +78,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		stderr:    stderr,
 		stack:     envOr("TFPR_STACK", "terraform/"),
 		workspace: envOr("TFPR_WORKSPACE", "default"),
-		api:       vcs.NewGitHubClient(os.Getenv("GITHUB_API_URL"), envOr("GH_TOKEN", os.Getenv("GITHUB_TOKEN"))),
+		api:       vcs.NewGitHubClient(os.Getenv("GITHUB_API_URL"), githubToken()),
 	}
 	commands := map[string]func() error{
 		"plan":             a.plan,
@@ -147,11 +151,13 @@ func (a *app) outputs(fields ...core.Field) error {
 }
 
 // terraform runs the terraform executable ($TFPR_TF_BIN, default terraform)
-// in dir. Every terraform call goes through here. A non-zero exit becomes an
-// exitCode carrying terraform's status.
+// in dir, with tfpr's own TFPR_* variables (including the API token) removed
+// from its environment. Every terraform call goes through here. A non-zero
+// exit becomes an exitCode carrying terraform's status.
 func (a *app) terraform(dir string, stdout, stderr io.Writer, args ...string) error {
 	cmd := exec.Command(envOr("TFPR_TF_BIN", "terraform"), args...)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, stdout, stderr
+	cmd.Env = terraformEnv(os.Environ())
 	err := cmd.Run()
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ee.ExitCode() > 0 {
@@ -542,6 +548,28 @@ func (a *app) resolvePlanRun() error {
 		}
 	}
 	return a.outputs(core.Field{Name: "run_id", Value: runID}, core.Field{Name: "pr_number", Value: prNum})
+}
+
+// terraformEnv is env without any TFPR_* variable.
+func terraformEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "TFPR_") {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// githubToken is the token for GitHub API calls: TFPR_GITHUB_TOKEN, which the
+// actions set from their token input, else GH_TOKEN or GITHUB_TOKEN.
+func githubToken() string {
+	for _, name := range []string{"TFPR_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func copyFile(src, dst string) error {

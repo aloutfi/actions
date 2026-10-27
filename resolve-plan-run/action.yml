@@ -50,5 +50,5 @@ runs:
       env:
         TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
         TFPR_PLAN_WORKFLOW: ${{ inputs.plan_workflow_filename }}
-        GH_TOKEN: ${{ inputs.token }}
+        TFPR_GITHUB_TOKEN: ${{ inputs.token }}
       run: '"${TFPR}" resolve-plan-run'

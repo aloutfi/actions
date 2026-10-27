@@ -65,7 +65,9 @@ Set provider credentials as job-level `env:`. Composite actions inherit it.
 Step-level `env:` on the `uses:` step does not reach the action's inner steps.
 
 The `token` input (default `github.token`) is used only for GitHub API calls.
-It is not exposed to terraform. If you pass a GitHub App token, set
+It is not exposed to terraform: tfpr receives it as `TFPR_GITHUB_TOKEN` and
+removes every `TFPR_*` variable from terraform's environment. A `GITHUB_TOKEN`
+you set in the job's `env:` for the GitHub provider still reaches terraform. If you pass a GitHub App token, set
 `comment_author` to the App's bot login (for example, `my-app[bot]`) so the
 comment upsert finds its own comments.
 
