@@ -159,7 +159,8 @@ func newScenario(t *testing.T) *scenario {
 		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED",
 		"FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY", "TFPR_ADO_TOKEN", "TFPR_ACK", "TF_BUILD",
 		"BUILD_REPOSITORY_PROVIDER", "SYSTEM_COLLECTIONURI", "TFPR_GITHUB_API_URL", "BUILD_REPOSITORY_URI",
-		"SYSTEM_PULLREQUEST_PULLREQUESTID", "SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "SYSTEM_PULLREQUEST_SOURCECOMMITID"} {
+		"SYSTEM_PULLREQUEST_PULLREQUESTID", "SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "SYSTEM_PULLREQUEST_SOURCECOMMITID",
+		"AGENT_TEMPDIRECTORY"} {
 		env[k] = ""
 	}
 	return &scenario{t: t, ws: ws, gh: gh, env: env}
@@ -1137,6 +1138,31 @@ func TestAzureReposComment(t *testing.T) {
 	lacks(t, "no hidden markup in the text", content, "<!--")
 	has(t, "the plan", content, "Terraform plan")
 	eq(t, "no GitHub calls", "", r.api)
+}
+
+// On Azure Pipelines the full plan goes to the run's Extensions tab
+// (task.uploadsummary), and the comment links the run for it.
+func TestAzureJobSummary(t *testing.T) {
+	ado := &fakeAzureRepos{}
+	srv := httptest.NewServer(ado)
+	t.Cleanup(srv.Close)
+	tmp := t.TempDir()
+	s := newScenario(t)
+	s.azure("TfsGit").set("SYSTEM_COLLECTIONURI", srv.URL+"/org/", "TFPR_ADO_TOKEN", "t", "AGENT_TEMPDIRECTORY", tmp)
+	s.byo("changes")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	m := regexp.MustCompile(`(?m)^##vso\[task\.uploadsummary\](.+)$`).FindStringSubmatch(r.out)
+	if m == nil {
+		t.Fatalf("no uploadsummary in:\n%s", r.out)
+	}
+	summary, err := os.ReadFile(m[1])
+	must(t, err)
+	has(t, "summary: the plan", string(summary), "Terraform plan")
+	lacks(t, "summary: Azure dialect", string(summary), "<details")
+	content := ado.created["comments"].([]any)[0].(map[string]any)["content"].(string)
+	has(t, "comment links the run for the full plan", content, "[full plan]("+srv.URL+"/org/proj/_build/results?buildId=812)")
+	lacks(t, "comment: Azure dialect", content, "<details")
 }
 
 func TestAzureTokenNeverReachesTerraform(t *testing.T) {

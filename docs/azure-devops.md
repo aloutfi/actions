@@ -146,17 +146,27 @@ steps:
   leaves a reviewer's resolution alone. When the plan changes, it reopens the
   thread with a reply saying so. Without it, every run sets the status again.
 
+## The full plan and the comment layout
+
+- `tfpr comment` uploads the full, filtered plan as the run's summary
+  (`task.uploadsummary`), on the run's **Extensions** tab. That tab has no
+  stable URL of its own, so the comment's "full plan" link opens the run.
+- Until a real PR shows what Azure Repos renders, the comment uses a
+  conservative dialect: headings instead of collapsible `<details>` blocks,
+  plain code fences instead of ```` ```diff ```` (each resource line still
+  says its action), and at most 140,000 characters.
+
 ## Not yet verified on a real PR
 
-These are assumptions until checked on a test PR. Check them before you rely
-on the comment layout:
+These are assumptions until checked on a test PR:
 
-- Whether `<details>` and `<summary>` render in PR threads. The current
-  layout uses them; a host-specific layout is planned.
-- Whether a ```` ```diff ```` fence is colored.
-- The comment size limit, reportedly about 150,000 characters. The default
-  `TFPR_COMMENT_BUDGET` (45,000) stays well under it.
-- The size limit of `task.uploadsummary`.
+- Whether `<details>` and `<summary>` render in PR threads, and whether a
+  ```` ```diff ```` fence is colored. If they do, the dialect can switch to
+  them.
+- The comment size limit, reportedly about 150,000 characters. tfpr stays
+  under 140,000.
+- The size limit of `task.uploadsummary`, which is undocumented. tfpr keeps
+  the summary under 512 KiB and falls back to a minimal summary past that.
 - Which commits a PR build sees. tfpr records the checked-out commit,
   `Build.SourceVersion` (the merge commit), as `source.sha`, and the PR head,
   `System.PullRequest.SourceCommitId`, as `source.head_sha`. This matches

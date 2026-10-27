@@ -141,6 +141,14 @@ func TestAzureCommands(t *testing.T) {
 	}
 }
 
+func TestAzureSummaryURLIsTheRun(t *testing.T) {
+	a := newAzure(snapshot(t, "azure-pr-tfsgit"), io.Discard, io.Discard, nil)
+	l, ok := a.(SummaryLinker)
+	if !ok || l.SummaryURL() != "https://dev.azure.example/org/Platform%20Team/_build/results?buildId=812" {
+		t.Errorf("summary link: %v", ok)
+	}
+}
+
 func TestAzureUploadSummary(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer

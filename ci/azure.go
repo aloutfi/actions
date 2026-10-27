@@ -138,6 +138,11 @@ func (a *Azure) UploadSummary(markdown redact.Text) error {
 	return err
 }
 
+// SummaryURL links to the run page. The uploaded summary is on the run's
+// Extensions tab, which has no stable URL of its own (its view id is an
+// undocumented contribution id), so tfpr links the run instead.
+func (a *Azure) SummaryURL() string { return a.runURL() }
+
 // AddBuildTag tags the run (build.addbuildtag), e.g. "drift".
 func (a *Azure) AddBuildTag(tag string) error {
 	_, err := fmt.Fprintf(a.out, "##vso[build.addbuildtag]%s\n", escapeMessage(tag))
