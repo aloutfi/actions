@@ -90,7 +90,7 @@ case "$1" in
   plan) echo "binary plan" > tfplan; echo "  # terraform_data.secret-key will be created"
         [ -z "$FAKE_TF_SAY" ] || echo "$FAKE_TF_SAY"; exit "${FAKE_TF_PLAN_CODE:-0}" ;;
   show) if [ "$2" = "-json" ]; then cat "$FAKE_TF_PLAN/plan.json"; else cat "$FAKE_TF_PLAN/plan.txt"; fi ;;
-  apply) exit "${FAKE_TF_APPLY_CODE:-0}" ;;
+  apply) [ -z "$FAKE_TF_SAY" ] || echo "$FAKE_TF_SAY"; exit "${FAKE_TF_APPLY_CODE:-0}" ;;
 esac
 `
 
@@ -719,6 +719,35 @@ func TestApplyCommentFilterFailure(t *testing.T) {
 	has(t, "says why", r.out, "nothing was posted")
 	lacks(t, "no write", r.api, "POST")
 	has(t, "terraform's own result stands in the outputs", r.outputs, "apply_exit_code=0")
+}
+
+// streamFilter fails only on terraform's echoed output (which carries
+// STREAM-MARK), never on plan text or comment bodies.
+const streamFilter = `in=$(cat); case "$in" in *STREAM-MARK*) exit 1;; esac; printf '%s\n' "$in"`
+
+// A filter failure on terraform's output fails the step, but every report
+// of terraform's result stays exact.
+func TestStreamFilterFailureKeepsTerraformsResult(t *testing.T) {
+	r := newScenario(t).set("TFPR_FILTER", streamFilter, "FAKE_TF_SAY", "STREAM-MARK").run("apply")
+	eq(t, "apply: step fails", 1, r.rc)
+	has(t, "apply: terraform's code in the outputs", r.outputs, "apply_exit_code=0")
+	has(t, "apply: comment shows the true result", r.body, "succeeded")
+	has(t, "apply: filter failure reported", r.out, "::error::redaction filter failed")
+
+	r = newScenario(t).set("TFPR_FILTER", streamFilter, "FAKE_TF_SAY", "STREAM-MARK", "FAKE_TF_APPLY_CODE", "3").run("apply")
+	eq(t, "failed apply: terraform's code is the exit status", 3, r.rc)
+	has(t, "failed apply: outputs", r.outputs, "apply_exit_code=3")
+	has(t, "failed apply: comment", r.body, "failed (exit 3)")
+
+	s := newScenario(t).set("TFPR_FILTER", streamFilter, "FAKE_TF_SAY", "STREAM-MARK",
+		"FAKE_TF_PLAN", filepath.Join(root, "test", "fixtures", "render", "changes"), "FAKE_TF_PLAN_CODE", "2")
+	r = s.run("plan")
+	eq(t, "plan: step fails", 1, r.rc)
+	eq(t, "plan: terraform's code in the outputs", "exit_code=2\n", r.outputs)
+	res := s.planResult()
+	has(t, "plan: recorded as failed", res, `"status": "error"`)
+	has(t, "plan: terraform's code kept", res, `"exit_code": 2,`)
+	has(t, "plan: reason", res, "redaction filter failed")
 }
 
 // derive parses plan.json strictly and fails closed.

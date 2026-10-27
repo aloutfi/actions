@@ -108,6 +108,7 @@ type app struct {
 	tfBin            string // resolved terraform executable
 	tfErr            error  // why tfBin could not be resolved
 	ci               ci.CI  // nil until loadCI
+	streamErr        error  // the first filter failure on terraform's echoed output
 	ctx              ci.Ctx
 }
 
@@ -222,12 +223,16 @@ func (a *app) terraform(dir string, stdout, stderr io.Writer, args ...string) er
 }
 
 // tf runs terraform in dir with its output echoed through the filter, in a
-// region where the CI interprets no commands.
+// region where the CI interprets no commands. It returns terraform's own
+// result, unchanged. A filter failure on the echoed output is kept in
+// a.streamErr; the command reports it separately and fails, but never
+// changes terraform's exit code.
 func (a *app) tf(dir string, args ...string) error {
 	iout, ierr := a.ci.Inert(a.stdout), a.ci.Inert(a.stderr)
 	out, errOut := a.filter.Writer(iout), a.filter.Writer(ierr)
 	err := a.terraform(dir, out, errOut, args...)
-	return closeAll(err, out, errOut, iout, ierr)
+	a.noteStream(closeAll(out, errOut, iout, ierr))
+	return err
 }
 
 // tfOutput runs terraform in dir and returns its stdout unfiltered; its
@@ -237,23 +242,26 @@ func (a *app) tfOutput(dir string, args ...string) ([]byte, error) {
 	ierr := a.ci.Inert(a.stderr)
 	errOut := a.filter.Writer(ierr)
 	err := a.terraform(dir, &out, errOut, args...)
-	return out.Bytes(), closeAll(err, errOut, ierr)
+	a.noteStream(closeAll(errOut, ierr))
+	return out.Bytes(), err
+}
+
+func (a *app) noteStream(err error) {
+	if err != nil && a.streamErr == nil {
+		a.streamErr = fmt.Errorf("%w (on terraform's output)", err)
+	}
 }
 
 // closeAll closes ws in order (filters before the inert regions they write
-// into). A close failure, such as a failed filter, wins over err: output may
-// have been lost, so the command must fail.
-func closeAll(err error, ws ...io.Closer) error {
+// into) and returns the first failure.
+func closeAll(ws ...io.Closer) error {
 	var first error
 	for _, w := range ws {
-		if cerr := w.Close(); cerr != nil && first == nil {
-			first = cerr
+		if err := w.Close(); err != nil && first == nil {
+			first = err
 		}
 	}
-	if first != nil {
-		return first
-	}
-	return err
+	return first
 }
 
 func (a *app) terraformVersion(dir string) string {
@@ -276,9 +284,10 @@ func (a *app) terraformVersion(dir string) string {
 func (a *app) plan() (err error) {
 	a.loadCI()
 	tool := core.Tool{Runner: "terraform", Binary: filepath.Base(a.tfBin)}
+	var planCode *int // terraform plan's exit code, once it ran
 	defer func() {
 		if err != nil {
-			a.recordFailure(tool, a.filter.Mode(), nil, err)
+			a.recordFailure(tool, a.filter.Mode(), planCode, err)
 		}
 	}()
 	dir := a.stack
@@ -303,11 +312,17 @@ func (a *app) plan() (err error) {
 		}
 		code = int(c)
 	}
+	planCode = &code
 	if err := a.outputs(core.Field{Name: "exit_code", Value: strconv.Itoa(code)}); err != nil {
 		return err
 	}
 	if code == 1 {
 		return tfFailed{"plan", 1}
+	}
+	// The output above reports terraform's code as it was; a failed filter on
+	// its echoed output still fails the plan.
+	if a.streamErr != nil {
+		return a.streamErr
 	}
 
 	// plan.json stays in the stack, next to tfplan; it holds values in
@@ -544,18 +559,25 @@ func (a *app) apply() error {
 		return err
 	}
 	// Best effort: a comment API failure must not change the apply's result.
-	// A filter failure does: nothing was posted, and the step must fail.
+	// A filter failure fails the step, but code stays terraform's: it is what
+	// the outputs and the comment report.
+	stepFailed := false
 	if err := a.postApplyComment(v, d, code, used, usePlanfile, attempt); errors.Is(err, redact.ErrFailed) {
 		a.ci.Log(ci.Error, err.Error()+"; nothing was posted")
-		if code == 0 {
-			code = 1
-		}
+		stepFailed = true
 	} else if err != nil {
 		fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
 		a.ci.Log(ci.Warning, fmt.Sprintf("Could not post the apply-result comment; the apply exit code (%d) stands.", code))
 	}
-	if code != 0 {
+	if a.streamErr != nil {
+		a.ci.Log(ci.Error, a.streamErr.Error())
+		stepFailed = true
+	}
+	switch {
+	case code != 0:
 		return exitCode(code)
+	case stepFailed:
+		return exitCode(1)
 	}
 	return nil
 }
