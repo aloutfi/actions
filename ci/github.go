@@ -36,9 +36,12 @@ func newGitHub(env Env, stdout, _ io.Writer, api *vcs.Client) CI {
 	return &GitHub{env: env, out: stdout, api: api}
 }
 
-// Context reads the run from the GITHUB_* environment.
+// Context reads the run from the GITHUB_* environment. On pull_request
+// builds GITHUB_SHA is the merge commit that was checked out; the PR head
+// comes from the event payload.
 func (g *GitHub) Context() Ctx {
 	e := g.env
+	pr, head := g.pr()
 	attempt := 1
 	if a := e("GITHUB_RUN_ATTEMPT"); a != "" {
 		attempt, _ = strconv.Atoi(a)
@@ -48,9 +51,12 @@ func (g *GitHub) Context() Ctx {
 		RunID:   e("GITHUB_RUN_ID"),
 		RunURL:  g.runURL(),
 		SHA:     e("GITHUB_SHA"),
+		HeadSHA: head,
 		Ref:     e("GITHUB_REF"),
-		PR:      g.pr(),
+		PR:      pr,
 		Repo:    e("GITHUB_REPOSITORY"),
+		VCS:     "github",
+		VCSURL:  e("GITHUB_API_URL"),
 		Actor:   e("GITHUB_ACTOR"),
 		Attempt: attempt,
 	}
@@ -60,24 +66,28 @@ func (g *GitHub) runURL() string {
 	return g.env("GITHUB_SERVER_URL") + "/" + g.env("GITHUB_REPOSITORY") + "/actions/runs/" + g.env("GITHUB_RUN_ID")
 }
 
-// pr is the PR number for pull_request builds, read from the event payload.
-func (g *GitHub) pr() string {
+// pr is the PR number and head commit for pull_request builds, read from
+// the event payload.
+func (g *GitHub) pr() (number, head string) {
 	if g.env("GITHUB_EVENT_NAME") != "pull_request" {
-		return ""
+		return "", ""
 	}
 	data, err := os.ReadFile(g.env("GITHUB_EVENT_PATH"))
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	var event struct {
 		PullRequest struct {
 			Number json.Number `json:"number"`
+			Head   struct {
+				SHA string `json:"sha"`
+			} `json:"head"`
 		} `json:"pull_request"`
 	}
 	if json.Unmarshal(data, &event) != nil {
-		return ""
+		return "", ""
 	}
-	return event.PullRequest.Number.String()
+	return event.PullRequest.Number.String(), event.PullRequest.Head.SHA
 }
 
 // JobURL links to this job's logs. The Actions context has no job id but the

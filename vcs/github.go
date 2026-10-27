@@ -1,6 +1,7 @@
 package vcs
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,12 +13,13 @@ import (
 // DefaultGitHubAuthor is the login of the default GITHUB_TOKEN identity.
 const DefaultGitHubAuthor = "github-actions[bot]"
 
-// NewGitHubClient is a REST client for the GitHub API at apiURL
-// (https://api.github.com when empty), authenticated with token if set.
+// GitHubAPI is the public GitHub API.
+const GitHubAPI = "https://api.github.com"
+
+// NewGitHubClient is a REST client for the GitHub API at apiURL,
+// authenticated with token if set. There is no default URL: the caller
+// decides, so an enterprise token is never sent to the public API.
 func NewGitHubClient(apiURL, token string) *Client {
-	if apiURL == "" {
-		apiURL = "https://api.github.com"
-	}
 	h := map[string]string{
 		"Accept":               "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
@@ -36,13 +38,31 @@ type GitHub struct {
 	author string
 }
 
-// NewGitHub returns the adapter for repo (owner/repo). Only comments by author
-// (default github-actions[bot]) are ever edited.
+// NewGitHub returns the adapter for repo (owner/repo). Only comments by
+// author are ever edited. With no author (outside GitHub Actions, where the
+// default token's login is github-actions[bot]), the adapter asks GitHub
+// whose token it holds (GET /user) before it posts anything.
 func NewGitHub(api *Client, repo, author string) *GitHub {
-	if author == "" {
-		author = DefaultGitHubAuthor
-	}
 	return &GitHub{api: api, repo: repo, author: author}
+}
+
+// ErrNoAuthor means tfpr can't tell which comments are its own, so it posts
+// none: posting anyway would duplicate the comment on every run.
+var ErrNoAuthor = errors.New("the comment author is unknown")
+
+// login is the author whose comments the adapter may edit.
+func (g *GitHub) login() (string, error) {
+	if g.author != "" {
+		return g.author, nil
+	}
+	var user struct {
+		Login string `json:"login"`
+	}
+	if _, err := g.api.Do(http.MethodGet, "/user", nil, &user); err != nil || user.Login == "" {
+		return "", fmt.Errorf("%w: GET /user failed (%v), as it does for GitHub App installation tokens. Set TFPR_COMMENT_AUTHOR to the login that posts, e.g. <app-slug>[bot]", ErrNoAuthor, err)
+	}
+	g.author = user.Login
+	return g.author, nil
 }
 
 type issueComment struct {
@@ -64,17 +84,23 @@ func Compose(marker, record string, body redact.Text) string {
 }
 
 // UpsertComment edits the first comment by the adapter's author that starts
-// with marker, or posts a new one. A human who pastes the marker into their
-// own comment never has it overwritten.
-func (g *GitHub) UpsertComment(pr, marker, record string, body redact.Text) (string, error) {
+// with the marker, or posts a new one. A human who pastes the marker into
+// their own comment never has it overwritten. GitHub issue comments have no
+// status, so Resolved and Fingerprint don't apply.
+func (g *GitHub) UpsertComment(c Comment) (string, error) {
+	pr, marker := c.PR, c.Marker
+	author, err := g.login()
+	if err != nil {
+		return "", err
+	}
 	var id int64
 	// If the listing fails, tfpr cannot know whether its comment exists, and
 	// posting could duplicate it, so it gives up instead.
-	err := GetPages(g.api, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100", g.repo, url.PathEscape(pr)),
+	err = GetPages(g.api, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100", g.repo, url.PathEscape(pr)),
 		func(page []issueComment) bool {
-			for _, c := range page {
-				if c.User.Login == g.author && strings.HasPrefix(c.Body, marker) {
-					id = c.ID
+			for _, ic := range page {
+				if ic.User.Login == author && strings.HasPrefix(ic.Body, marker) {
+					id = ic.ID
 					return false
 				}
 			}
@@ -83,7 +109,7 @@ func (g *GitHub) UpsertComment(pr, marker, record string, body redact.Text) (str
 	if err != nil {
 		return "", fmt.Errorf("list comments on PR #%s: %w", pr, err)
 	}
-	payload := map[string]string{"body": Compose(marker, record, body)}
+	payload := map[string]string{"body": Compose(marker, c.Record, c.Body)}
 	if id != 0 {
 		if _, err := g.api.Do(http.MethodPatch, fmt.Sprintf("/repos/%s/issues/comments/%d", g.repo, id), payload, nil); err != nil {
 			return "", err
@@ -96,8 +122,9 @@ func (g *GitHub) UpsertComment(pr, marker, record string, body redact.Text) (str
 	return "Posted comment on PR #" + pr, nil
 }
 
-// PRsForCommit lists the PRs associated with sha (first page only).
-func (g *GitHub) PRsForCommit(sha string) ([]PR, error) {
+// PRsForCommit lists the PRs associated with sha (first page only). GitHub
+// answers this directly, so the ref is not needed.
+func (g *GitHub) PRsForCommit(sha, _ string) ([]PR, error) {
 	var pulls []struct {
 		Number int `json:"number"`
 		Head   struct {

@@ -53,13 +53,19 @@
 //	TFPR_PLAN_RUN_ID                apply: run that produced the planfile (comment only)
 //	TFPR_LOCK_TIMEOUT               apply: -lock-timeout (5m)
 //	TFPR_PLAN_WORKFLOW              resolve-plan-run: plan workflow file name
-//	TFPR_VCS                        repo host: github (default), or none
-//	TFPR_REPO                       repo id for the repo host (the CI's repository)
+//	TFPR_VCS                        repo host: github, azure or none (default: where
+//	                                the CI says the repo lives, else github)
+//	TFPR_REPO                       repo id for the repo host (the CI's repository):
+//	                                owner/repo, or <project>/<repository> on Azure Repos
+//	TFPR_ACK                        Azure Repos: keep a reviewer's resolution of a plan
+//	                                thread until the plan changes (false)
 //	TFPR_OUTPUT_FILE                step-output file outside a supported CI (stdout)
 //
-// The GitHub adapters authenticate with TFPR_GITHUB_TOKEN (outside the
-// actions: GH_TOKEN or GITHUB_TOKEN) against GITHUB_API_URL
-// (https://api.github.com). terraform never sees any TFPR_* variable, so the
+// The GitHub adapters share one client: TFPR_GITHUB_TOKEN (outside the
+// actions: GH_TOKEN or GITHUB_TOKEN) against TFPR_GITHUB_API_URL, else the
+// CI's GitHub API (GITHUB_API_URL on GitHub Actions), else
+// https://api.github.com. Azure Repos uses TFPR_ADO_TOKEN (map
+// $(System.AccessToken) to it) against the build's collection. terraform never sees any TFPR_* variable, so the
 // token the actions pass stays out of it; a GITHUB_TOKEN the caller sets for
 // the GitHub provider still reaches it.
 package main
@@ -116,7 +122,8 @@ func asTFFailed(cmd string, err error) error {
 type app struct {
 	stdout, stderr   io.Writer
 	stack, workspace string
-	api              *vcs.Client
+	api              *vcs.Client // the one GitHub client
+	apiErr           error       // why its base URL is unknown
 	filter           redact.Filter
 	tfBin            string // resolved terraform executable
 	tfErr            error  // why tfBin could not be resolved
@@ -131,7 +138,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		stderr:    stderr,
 		stack:     core.CleanStack(envOr("TFPR_STACK", "terraform/")),
 		workspace: envOr("TFPR_WORKSPACE", "default"),
-		api:       vcs.NewGitHubClient(os.Getenv("GITHUB_API_URL"), githubToken()),
 	}
 	a.filter = redact.Configured(stderr, a.logIssue)
 	a.tfBin, a.tfErr = resolveExecutable(envOr("TFPR_TF_BIN", "terraform"))
@@ -172,18 +178,59 @@ func (a *app) exit(err error) int {
 	return 1
 }
 
+// loadCI detects the CI and builds the one GitHub REST client that both the
+// CI adapter (job links) and the repo-host adapter use. Its base URL is
+// settled once the CI says where GitHub is.
 func (a *app) loadCI() {
+	a.api = &vcs.Client{}
 	a.ci = ci.Detect(os.Getenv, a.stdout, a.stderr, a.api)
 	a.ctx = a.ci.Context()
+	var base string
+	base, a.apiErr = githubAPIURL(a.ctx) // on error base is "": every request fails
+	*a.api = *vcs.NewGitHubClient(base, githubToken())
 }
 
+// githubAPIURL is the GitHub API to use: TFPR_GITHUB_API_URL, else what the
+// CI says (GITHUB_API_URL on GitHub Actions, the repository's host for
+// GitHub Enterprise on Azure Pipelines), else the public API, but never the
+// public API for a private host.
+func githubAPIURL(ctx ci.Ctx) (string, error) {
+	if u := os.Getenv("TFPR_GITHUB_API_URL"); u != "" {
+		return u, nil
+	}
+	if ctx.VCS == "github" && ctx.VCSURL != "" {
+		return ctx.VCSURL, nil
+	}
+	if ctx.VCSPrivate {
+		return "", errors.New("the repository is on GitHub Enterprise, but its API URL is unknown: set TFPR_GITHUB_API_URL (https://<host>/api/v3); tfpr will not send its token to api.github.com")
+	}
+	return vcs.GitHubAPI, nil
+}
+
+// loadVCS picks the repo host: TFPR_VCS, else the one the CI says the repo
+// lives on (Azure Pipelines can build Azure Repos or GitHub repos), else
+// GitHub. Each host gets only its own token.
 func (a *app) loadVCS() (vcs.VCS, error) {
-	return vcs.New(vcs.Config{
-		Name:   os.Getenv("TFPR_VCS"),
+	cfg := vcs.Config{
+		Name:   envOr("TFPR_VCS", a.ctx.VCS),
 		Repo:   a.repo(),
-		API:    a.api,
 		Author: os.Getenv("TFPR_COMMENT_AUTHOR"),
-	})
+		Ack:    os.Getenv("TFPR_ACK") == "true",
+	}
+	// GitHub Actions' token posts as github-actions[bot]. Anywhere else the
+	// GitHub adapter asks GitHub whose token it holds.
+	if cfg.Author == "" && a.ctx.CI == "github" {
+		cfg.Author = vcs.DefaultGitHubAuthor
+	}
+	if cfg.Name == "azure" {
+		cfg.URL, cfg.Token = a.ctx.VCSURL, os.Getenv("TFPR_ADO_TOKEN")
+	} else {
+		if a.apiErr != nil && cfg.Name != "none" {
+			return nil, a.apiErr
+		}
+		cfg.GitHub = a.api
+	}
+	return vcs.New(cfg)
 }
 
 func (a *app) repo() string { return envOr("TFPR_REPO", a.ctx.Repo) }
@@ -413,7 +460,13 @@ func (a *app) render() error {
 	if err != nil {
 		return err
 	}
-	_, err = io.WriteString(a.stdout, vcs.Compose(marker, record, body))
+	// Hosts that hide HTML comments carry the marker and record in the text;
+	// the others (Azure Repos) keep them in thread properties.
+	out := body.String()
+	if a.commentHost().HiddenHTML {
+		out = vcs.Compose(marker, record, body)
+	}
+	_, err = io.WriteString(a.stdout, out)
 	return err
 }
 
@@ -468,8 +521,13 @@ func (a *app) comment() error {
 // postPlanComment upserts the rendered plan comment.
 func (a *app) postPlanComment(v vcs.VCS, pr string, r core.PlanResult, marker, record string, body redact.Text, missing bool) error {
 	// Best effort: a comment API failure shouldn't hide the plan's own result.
-	msg, err := v.UpsertComment(pr, marker, record, body)
+	msg, err := v.UpsertComment(vcs.Comment{
+		PR: pr, Marker: marker, Record: record, Body: body,
+		Resolved: r.Summary.Status == core.StatusNoOp, Fingerprint: core.RunFingerprint(r),
+	})
 	switch {
+	case errors.Is(err, vcs.ErrNoAuthor):
+		return err // a setup error, not a flaky API: fix it, don't skip it
 	case err != nil && r.Summary.Status == core.StatusError:
 		fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
 		a.ci.Log(ci.Warning, "Could not post the plan-failed comment on PR #"+pr+".")
@@ -580,7 +638,7 @@ func (a *app) apply() error {
 	// A filter failure fails the step, but code stays terraform's: it is what
 	// the outputs and the comment report.
 	stepFailed := false
-	if err := a.postApplyComment(v, d, code, used, usePlanfile, attempt); errors.Is(err, redact.ErrFailed) {
+	if err := a.postApplyComment(v, d, code, used, usePlanfile, attempt); errors.Is(err, redact.ErrFailed) || errors.Is(err, vcs.ErrNoAuthor) {
 		a.ci.Log(ci.Error, err.Error()+"; nothing was posted")
 		stepFailed = true
 	} else if err != nil {
@@ -636,7 +694,7 @@ func (a *app) terraformApply(source string) int {
 func (a *app) postApplyComment(v vcs.VCS, d core.Decision, code int, used, usePlanfile bool, attempt int) error {
 	sha := a.ctx.SHA
 	// Not every apply comes from a PR merge (drift, manual dispatch); skip quietly.
-	prs, err := v.PRsForCommit(sha)
+	prs, err := v.PRsForCommit(sha, a.ctx.Ref)
 	if err != nil || len(prs) == 0 {
 		fmt.Fprintf(a.stdout, "No PR associated with %s; skipping apply-result comment.\n", sha)
 		return nil
@@ -660,7 +718,8 @@ func (a *app) postApplyComment(v vcs.VCS, d core.Decision, code int, used, usePl
 	if err != nil {
 		return err
 	}
-	msg, err := v.UpsertComment(pr, core.ApplyMarker(a.stack, a.workspace), "", body)
+	// A failed apply needs attention: its thread stays active.
+	msg, err := v.UpsertComment(vcs.Comment{PR: pr, Marker: core.ApplyMarker(a.stack, a.workspace), Body: body, Resolved: code == 0})
 	if err != nil {
 		return err
 	}
@@ -690,7 +749,7 @@ func (a *app) resolvePlanRun() error {
 		// nothing so apply takes the fresh-plan path.
 		a.ci.Log(ci.Notice, fmt.Sprintf("Re-run detected (attempt=%d); fresh-plan fallback", attempt))
 	} else {
-		prs, err := v.PRsForCommit(sha)
+		prs, err := v.PRsForCommit(sha, a.ctx.Ref)
 		if err != nil {
 			return err
 		}

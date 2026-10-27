@@ -16,8 +16,11 @@ import (
 // minimal layout (headline, banner, counts, links).
 const minCommentBody = 1000
 
-// commentHost is the dialect and limits of the repo host the comment goes to.
-func commentHost() core.Host { return core.HostFor(envOr("TFPR_VCS", "github")) }
+// commentHost is the dialect and limits of the repo host the comment goes
+// to: TFPR_VCS, else where the CI says the repo lives, else GitHub.
+func (a *app) commentHost() core.Host {
+	return core.HostFor(envOr("TFPR_VCS", a.ctx.VCS))
+}
 
 // renderPlan renders the plan comment's human-readable body and passes it
 // through the filter. The marker and record, tfpr's own control lines, are
@@ -29,7 +32,7 @@ func commentHost() core.Host { return core.HostFor(envOr("TFPR_VCS", "github")) 
 // rejects longer comments. If the filter lengthens the body past it, the
 // minimal layout is posted instead.
 func (a *app) renderPlan(r core.PlanResult, texts map[string]string, links core.Links) (body redact.Text, marker, record string, err error) {
-	host := commentHost()
+	host := a.commentHost()
 	limit := host.MaxComment
 	if b := os.Getenv("TFPR_COMMENT_BUDGET"); b != "" {
 		if limit, err = strconv.Atoi(b); err != nil || limit <= 0 {
@@ -38,7 +41,10 @@ func (a *app) renderPlan(r core.PlanResult, texts map[string]string, links core.
 		limit = min(limit, host.MaxComment)
 	}
 	marker, record = core.PlanMarker(r.Target.Stack, r.Target.Workspace), core.Record(r)
-	head := utf8.RuneCountInString(marker+record) + 2 // and two newlines
+	head := 0
+	if host.HiddenHTML { // the marker and record go above the body, two lines
+		head = utf8.RuneCountInString(marker+record) + 2
+	}
 	if limit < head+minCommentBody {
 		return body, "", "", fmt.Errorf("TFPR_COMMENT_BUDGET is %d characters; this comment needs at least %d (%d for its marker and record, %d for a minimal body)",
 			limit, head+minCommentBody, head, minCommentBody)

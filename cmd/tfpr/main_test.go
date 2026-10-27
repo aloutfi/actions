@@ -28,6 +28,7 @@ type fakeGitHub struct {
 	planRun    string
 	failWrites bool
 	failList   bool   // listing comments fails
+	user       string // GET /user login; "" answers 403 like an app token
 	comments   string // JSON for the PR's existing comments
 
 	mu    sync.Mutex
@@ -54,6 +55,12 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.body = req.Body
 		io.WriteString(w, `{"id":1}`)
+	case p == "/user":
+		if f.user == "" {
+			http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
+			return
+		}
+		io.WriteString(w, `{"login":"`+f.user+`"}`)
 	case strings.HasSuffix(p, "/jobs"):
 		io.WriteString(w, `{"jobs":[{"id":7,"runner_name":"other"},{"id":8,"runner_name":null}]}`)
 	case strings.HasSuffix(p, "/comments"):
@@ -129,7 +136,7 @@ func newScenario(t *testing.T) *scenario {
 	stub := filepath.Join(dir, "terraform")
 	must(t, os.WriteFile(stub, []byte(stubTerraform), 0o755))
 	event := filepath.Join(dir, "event.json")
-	must(t, os.WriteFile(event, []byte(`{"pull_request":{"number":42}}`), 0o644))
+	must(t, os.WriteFile(event, []byte(`{"pull_request":{"number":42,"head":{"sha":"prhead"}}}`), 0o644))
 	gh := &fakeGitHub{t: t, pr: "42", branchHead: "abc", comments: `[]`}
 	srv := httptest.NewServer(gh)
 	t.Cleanup(srv.Close)
@@ -149,7 +156,11 @@ func newScenario(t *testing.T) *scenario {
 		"TFPR_COMMENT_BUDGET", "TFPR_COMMENT_AUTHOR", "TFPR_USE_PLANFILE", "TFPR_ALLOW_FRESH_PLAN_FALLBACK",
 		"TFPR_PLAN_DIR", "TFPR_PLAN_RUN_ID", "TFPR_LOCK_TIMEOUT", "TFPR_PLAN_WORKFLOW", "TFPR_VCS",
 		"TFPR_REPO", "TFPR_OUTPUT_FILE", "TFPR_DIR", "TFPR_FILTER", "TFPR_PLAN_JSON", "TFPR_PLAN_TXT", "TFPR_PLANFILE",
-		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED", "FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY"} {
+		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED",
+		"FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY", "TFPR_ADO_TOKEN", "TFPR_ACK", "TF_BUILD",
+		"BUILD_REPOSITORY_PROVIDER", "SYSTEM_COLLECTIONURI", "TFPR_GITHUB_API_URL", "BUILD_REPOSITORY_URI",
+		"SYSTEM_PULLREQUEST_PULLREQUESTID", "SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "SYSTEM_PULLREQUEST_SOURCECOMMITID",
+		"AGENT_TEMPDIRECTORY"} {
 		env[k] = ""
 	}
 	return &scenario{t: t, ws: ws, gh: gh, env: env}
@@ -1001,6 +1012,215 @@ func TestFileSHA256(t *testing.T) {
 	must(t, err)
 	_, err = fileSHA256(filepath.Join(t.TempDir(), "missing"))
 	eq(t, "missing file", true, err != nil)
+}
+
+// azure turns a scenario into an Azure Pipelines PR build of a repo on
+// provider (TfsGit or GitHub).
+func (s *scenario) azure(provider string) *scenario {
+	return s.set("GITHUB_ACTIONS", "", "TF_BUILD", "True", "BUILD_REPOSITORY_PROVIDER", provider,
+		"BUILD_BUILDID", "812", "SYSTEM_JOBATTEMPT", "1", "SYSTEM_TEAMPROJECT", "proj",
+		"SYSTEM_TEAMPROJECTID", "proj", "BUILD_REPOSITORY_ID", "repo", "BUILD_REPOSITORY_NAME", "o/r",
+		"BUILD_SOURCEBRANCH", "refs/pull/7/merge", "BUILD_SOURCEVERSION", "mergecommit",
+		"SYSTEM_PULLREQUEST_SOURCECOMMITID", "abc", "SYSTEM_PULLREQUEST_PULLREQUESTID", "7",
+		"SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "42")
+}
+
+// The Bridge payoff: Azure Pipelines building a GitHub repo comments through
+// the GitHub adapter, with no code written for the combination.
+func TestAzurePipelinesWithGitHubRepo(t *testing.T) {
+	s := newScenario(t)
+	s.azure("GitHub").set("SYSTEM_COLLECTIONURI", "https://dev.azure.example/org/",
+		"TFPR_GITHUB_TOKEN", "gh-token", "TFPR_GITHUB_API_URL", s.env["GITHUB_API_URL"])
+	s.byo("changes")
+	s.gh.user = "ci-bot" // not github-actions[bot]: the token's own login
+	s.gh.comments = `[{"id":6,"user":{"login":"ci-bot"},"body":"<!-- tf-plan:stack :: default -->\nold"}]`
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "asks whose token it holds", r.api, "GET /user")
+	has(t, "updates its own comment, no duplicate", r.api, "PATCH /repos/o/r/issues/comments/6")
+	lacks(t, "no duplicate", r.api, "POST")
+	r = s.run("comment")
+	has(t, "second run updates again", r.api, "PATCH /repos/o/r/issues/comments/6")
+	eq(t, "with the GitHub token", "Bearer gh-token", s.gh.auth)
+	has(t, "links the Azure run", r.body, "https://dev.azure.example/org/proj/_build/results?buildId=812")
+	has(t, "records the planned (merge) commit", r.body, `"sha":"mergecommit"`)
+	has(t, "and the PR head", s.planResult(), `"head_sha": "abc"`)
+}
+
+// A GitHub Enterprise repo on Azure Pipelines never falls back to the public
+// GitHub API: without the enterprise API URL, comment fails and sends
+// nothing.
+func TestGitHubEnterpriseNeedsItsAPI(t *testing.T) {
+	s := newScenario(t)
+	s.azure("GitHubEnterprise").set("TFPR_GITHUB_TOKEN", "ghe-token")
+	s.byo("no-changes")
+	r := s.run("comment")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "says how to fix it", r.out, "set TFPR_GITHUB_API_URL")
+	eq(t, "no requests", "", r.api)
+
+	s.set("TFPR_GITHUB_API_URL", s.env["GITHUB_API_URL"])
+	s.gh.user = "ci-bot"
+	r = s.run("comment")
+	eq(t, "with the URL: exit code", 0, r.rc)
+	has(t, "with the URL: comments", r.api, "POST /repos/o/r/issues/42/comments")
+}
+
+// The apply result on Azure Repos: a successful apply's thread is closed, a
+// failed one stays active.
+func TestAzureApplyThreadStatus(t *testing.T) {
+	for code, want := range map[string]string{"0": "closed", "3": "active"} {
+		ado := &fakeAzureRepos{}
+		srv := httptest.NewServer(ado)
+		s := newScenario(t)
+		s.azure("TfsGit").set("SYSTEM_COLLECTIONURI", srv.URL+"/org/", "TFPR_ADO_TOKEN", "t",
+			"BUILD_SOURCEBRANCH", "refs/heads/main", "SYSTEM_PULLREQUEST_SOURCECOMMITID", "", "SYSTEM_PULLREQUEST_PULLREQUESTID", "",
+			"BUILD_SOURCEVERSION", "squash1", "FAKE_TF_APPLY_CODE", code)
+		ado.mergedPR = 7
+		r := s.run("apply")
+		eq(t, "apply "+code+": thread status", any(want), ado.created["status"])
+		has(t, "apply "+code+": posted", r.out, "Posted thread on PR #7")
+		srv.Close()
+	}
+}
+
+// fakeAzureRepos records thread creation on an empty PR.
+type fakeAzureRepos struct {
+	mergedPR int // the PR that commit squash1 merged into main, if any
+	mu       sync.Mutex
+	auth     string
+	created  map[string]any
+	calls    []string
+}
+
+func (f *fakeAzureRepos) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.auth = r.Header.Get("Authorization")
+	f.calls = append(f.calls, r.Method+" "+r.URL.Path)
+	switch {
+	case r.URL.Path == "/org/_apis/connectionData":
+		io.WriteString(w, `{"authenticatedUser":{"id":"build-id"}}`)
+	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullrequestquery":
+		fmt.Fprintf(w, `{"results":[{"squash1":[{"pullRequestId":%d,"lastMergeSourceCommit":{"commitId":"head"}}]}]}`, f.mergedPR)
+	case strings.HasSuffix(r.URL.Path, "/refs"):
+		io.WriteString(w, `{"value":[{"name":"refs/heads/main","objectId":"squash1"}]}`)
+	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads" && r.Method == http.MethodGet:
+		io.WriteString(w, `{"value":[]}`)
+	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads":
+		_ = json.NewDecoder(r.Body).Decode(&f.created)
+		io.WriteString(w, `{"id":1}`)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// Azure Pipelines building an Azure Repos repo: outputs are logging
+// commands, and the plan lands in a PR thread whose properties carry the
+// marker and record.
+func TestAzureReposComment(t *testing.T) {
+	ado := &fakeAzureRepos{}
+	srv := httptest.NewServer(ado)
+	t.Cleanup(srv.Close)
+	s := newScenario(t).azure("TfsGit").set("SYSTEM_COLLECTIONURI", srv.URL+"/org/", "TFPR_ADO_TOKEN", "ado-token")
+	r := s.byo("no-changes")
+	has(t, "derive: outputs are logging commands", r.out, "##vso[task.setvariable variable=exit_code;isOutput=true]0\n")
+
+	r = s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "says so", r.out, "Posted thread on PR #7")
+	eq(t, "with the Azure token", "Bearer ado-token", ado.auth)
+	eq(t, "no-op plans start closed", "closed", ado.created["status"])
+	props := ado.created["properties"].(map[string]any)
+	eq(t, "marker property", "<!-- tf-plan:stack :: default -->", props["tfpr.marker"].(map[string]any)["$value"])
+	has(t, "record property", props["tfpr.record"].(map[string]any)["$value"].(string), `"status":"no_op"`)
+	content := ado.created["comments"].([]any)[0].(map[string]any)["content"].(string)
+	lacks(t, "no hidden markup in the text", content, "<!--")
+	has(t, "the plan", content, "Terraform plan")
+	eq(t, "no GitHub calls", "", r.api)
+}
+
+// On Azure Pipelines the full plan goes to the run's Extensions tab
+// (task.uploadsummary), and the comment links the run for it.
+func TestAzureJobSummary(t *testing.T) {
+	ado := &fakeAzureRepos{}
+	srv := httptest.NewServer(ado)
+	t.Cleanup(srv.Close)
+	tmp := t.TempDir()
+	s := newScenario(t)
+	s.azure("TfsGit").set("SYSTEM_COLLECTIONURI", srv.URL+"/org/", "TFPR_ADO_TOKEN", "t", "AGENT_TEMPDIRECTORY", tmp)
+	s.byo("changes")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	m := regexp.MustCompile(`(?m)^##vso\[task\.uploadsummary\](.+)$`).FindStringSubmatch(r.out)
+	if m == nil {
+		t.Fatalf("no uploadsummary in:\n%s", r.out)
+	}
+	summary, err := os.ReadFile(m[1])
+	must(t, err)
+	has(t, "summary: the plan", string(summary), "Terraform plan")
+	lacks(t, "summary: Azure dialect", string(summary), "<details")
+	content := ado.created["comments"].([]any)[0].(map[string]any)["content"].(string)
+	has(t, "comment links the run for the full plan", content, "[full plan]("+srv.URL+"/org/proj/_build/results?buildId=812)")
+	lacks(t, "comment: Azure dialect", content, "<details")
+}
+
+func TestAzureTokenNeverReachesTerraform(t *testing.T) {
+	s := newScenario(t).azure("TfsGit").set("SYSTEM_COLLECTIONURI", "https://dev.azure.example/org/",
+		"TFPR_ADO_TOKEN", "ado-token", "FAKE_TF_PLAN", filepath.Join(root, "test", "fixtures", "render", "changes"), "FAKE_TF_PLAN_CODE", "2")
+	r := s.run("plan")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "outputs", r.out, "##vso[task.setvariable variable=has_changes;isOutput=true]true")
+	env, err := os.ReadFile(s.env["FAKE_LOG"] + ".env")
+	must(t, err)
+	lacks(t, "terraform env", string(env), "ado-token")
+}
+
+// One GitHub client serves both the CI adapter (the job link) and the repo
+// host (the comment), so a base-URL override reaches both.
+func TestOneGitHubClient(t *testing.T) {
+	s := newScenario(t)
+	fake := s.env["GITHUB_API_URL"]
+	s.set("GITHUB_EVENT_NAME", "pull_request", "GITHUB_API_URL", "http://127.0.0.1:9", "TFPR_GITHUB_API_URL", fake)
+	s.byo("no-changes")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "job link lookup", r.api, "GET /repos/o/r/actions/runs/1/jobs")
+	has(t, "comment", r.api, "POST /repos/o/r/issues/42/comments")
+}
+
+// Without a known author tfpr would post a new comment every run: it fails
+// instead and asks for TFPR_COMMENT_AUTHOR.
+func TestUnknownCommentAuthorFails(t *testing.T) {
+	s := newScenario(t)
+	s.azure("GitHub").set("TFPR_GITHUB_API_URL", s.env["GITHUB_API_URL"])
+	s.byo("no-changes")
+	r := s.run("comment")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "asks for the author", r.out, "Set TFPR_COMMENT_AUTHOR")
+	lacks(t, "posts nothing", r.api, "POST")
+
+	s.set("TFPR_COMMENT_AUTHOR", "my-app[bot]")
+	r = s.run("comment")
+	eq(t, "with the author: exit code", 0, r.rc)
+	eq(t, "with the author: no second lookup", 1, strings.Count(r.api, "GET /user"))
+}
+
+// Both CIs record the commit that was checked out and planned (the merge
+// commit on PR builds) as source.sha, and the PR head as source.head_sha.
+func TestPlannedCommitAndPRHead(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request")
+	s.byo("no-changes")
+	res := s.planResult()
+	has(t, "GitHub: planned commit", res, `"sha": "abc"`)
+	has(t, "GitHub: PR head", res, `"head_sha": "prhead"`)
+
+	s = newScenario(t)
+	s.azure("TfsGit").set("SYSTEM_COLLECTIONURI", "https://dev.azure.example/org/")
+	s.byo("no-changes")
+	res = s.planResult()
+	has(t, "Azure: planned commit", res, `"sha": "mergecommit"`)
+	has(t, "Azure: PR head", res, `"head_sha": "abc"`)
 }
 
 func TestUsage(t *testing.T) {

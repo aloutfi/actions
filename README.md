@@ -14,7 +14,8 @@ standard library only) with thin GitHub Actions wrappers.
 - `resolve-plan-run`: finds the PR's plan run for a merge commit, so apply can
   download that run's planfile.
 
-Azure DevOps support is in progress.
+Azure Pipelines and Azure Repos are supported for the PR flow (plan, then
+comment); see [docs/azure-devops.md](docs/azure-devops.md).
 
 ## Usage
 
@@ -198,8 +199,9 @@ exit "$failed"
 - If the two steps run in different jobs, run `derive` in step 1 and hand over
   only the plan dir (below), never `plan.json`.
 - `derive` and `render` work anywhere. `comment` needs a pull request from a
-  supported CI and repo host: GitHub Actions and GitHub today, with Azure
-  DevOps in progress.
+  supported CI (GitHub Actions, Azure Pipelines) on a supported repo host
+  (GitHub, Azure Repos). For Azure DevOps, see
+  [docs/azure-devops.md](docs/azure-devops.md).
 
 ### The plan dir
 
