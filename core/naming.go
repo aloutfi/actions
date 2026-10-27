@@ -29,11 +29,10 @@ func ArtifactName(stack, workspace string) string {
 	return "tfplan-" + slug + "-" + orDefault(workspace)
 }
 
-// SameStack reports whether two stack paths name the same directory, so that
-// "infra", "infra/" and "./infra" match.
-func SameStack(a, b string) bool { return cleanStack(a) == cleanStack(b) }
-
-func cleanStack(s string) string { return path.Clean(filepath.ToSlash(s)) }
+// CleanStack is the one spelling of a stack path that tfpr uses everywhere
+// (comment markers and labels, plan metadata, artifact names, the planfile
+// match): "infra", "infra/" and "./infra" are all "infra".
+func CleanStack(s string) string { return path.Clean(filepath.ToSlash(s)) }
 
 // PlanMarker opens the plan comment for a stack and workspace; the upsert
 // finds its own comment by this prefix.

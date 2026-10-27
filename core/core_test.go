@@ -72,10 +72,17 @@ func TestArtifactName(t *testing.T) {
 	}
 }
 
-func TestSameStack(t *testing.T) {
+func TestCleanStack(t *testing.T) {
 	for _, c := range cases(t, "same_stack.tsv", 4) {
-		if got := SameStack(c[1], c[2]); got != (c[3] == "true") {
-			t.Errorf("%s: SameStack(%q, %q) = %v", c[0], c[1], c[2], got)
+		if got := CleanStack(c[1]) == CleanStack(c[2]); got != (c[3] == "true") {
+			t.Errorf("%s: %q and %q: same = %v", c[0], c[1], c[2], got)
+		}
+	}
+	for in, want := range map[string]string{
+		"terraform/": "terraform", "./infra": "infra", "stacks//net/": "stacks/net", ".": ".", "./": ".",
+	} {
+		if got := CleanStack(in); got != want {
+			t.Errorf("CleanStack(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

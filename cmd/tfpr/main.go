@@ -13,7 +13,8 @@
 //
 // Configuration comes from TFPR_* environment variables:
 //
-//	TFPR_STACK                      terraform directory and comment label (terraform/)
+//	TFPR_STACK                      terraform directory and comment label (terraform/);
+//	                                cleaned once, so infra/, ./infra and infra are one stack
 //	TFPR_WORKSPACE                  terraform workspace (default)
 //	TFPR_TF_BIN                     terraform executable (terraform)
 //	TFPR_EXIT_CODE                  render/comment: the plan's -detailed-exitcode
@@ -78,7 +79,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	a := &app{
 		stdout:    stdout,
 		stderr:    stderr,
-		stack:     envOr("TFPR_STACK", "terraform/"),
+		stack:     core.CleanStack(envOr("TFPR_STACK", "terraform/")),
 		workspace: envOr("TFPR_WORKSPACE", "default"),
 		api:       vcs.NewGitHubClient(os.Getenv("GITHUB_API_URL"), githubToken()),
 	}
@@ -354,8 +355,7 @@ func (a *app) decide() error {
 }
 
 // reviewedPlanfile reports whether TFPR_PLAN_DIR holds a downloaded planfile
-// whose plan-metadata.json is for this stack (compared as cleaned paths, so
-// "infra/" matches "infra") and workspace. A tfplan already
+// whose plan-metadata.json is for this stack and workspace. A tfplan already
 // in the stack directory (say, from an earlier plan in the same job) never
 // counts as the reviewed plan.
 func (a *app) reviewedPlanfile() bool {
@@ -371,8 +371,10 @@ func (a *app) reviewedPlanfile() bool {
 	if err == nil {
 		err = json.Unmarshal(data, &meta)
 	}
+	// Cleaned here too: metadata written before stacks were normalized may
+	// still carry "infra/".
 	stack, ok := meta["stack"].(string)
-	if err != nil || !ok || !core.SameStack(stack, a.stack) || meta["workspace"] != a.workspace {
+	if err != nil || !ok || core.CleanStack(stack) != a.stack || meta["workspace"] != a.workspace {
 		a.ci.Log(ci.Warning, fmt.Sprintf("Ignoring the planfile artifact: its plan-metadata.json is missing or is not for stack '%s' workspace '%s'.", a.stack, a.workspace))
 		return false
 	}

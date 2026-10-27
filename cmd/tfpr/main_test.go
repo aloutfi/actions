@@ -324,6 +324,21 @@ func TestCommentPosts(t *testing.T) {
 	golden(t, "comments/plan.md", r.body)
 }
 
+// The stack is cleaned once, so every spelling yields the same marker, label
+// and metadata.
+func TestStackIsCleaned(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_EXIT_CODE", "0", "TFPR_STACK", "./stack/")
+	s.copyFixture("no-changes")
+	r := s.run("comment")
+	golden(t, "comments/plan.md", r.body)
+
+	s = newScenario(t).set("TFPR_STACK", "./stack/", "FAKE_TF_PLAN", filepath.Join(root, "test", "fixtures", "render", "no-changes"))
+	s.run("plan")
+	meta, err := os.ReadFile(filepath.Join(s.ws, "stack", "plan-metadata.json"))
+	must(t, err)
+	has(t, "metadata stack", string(meta), `"stack": "stack",`)
+}
+
 func TestCommentUpdatesOwnComment(t *testing.T) {
 	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_EXIT_CODE", "0")
 	s.copyFixture("no-changes")
