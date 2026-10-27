@@ -109,14 +109,22 @@ How apply chooses what to run:
 | `use_planfile: false` | Fresh plan, `-auto-approve` |
 | First attempt, planfile downloaded for this stack and workspace | Apply the planfile |
 | First attempt, planfile missing or for another stack/workspace | **Fail**, or a fresh plan with `allow_fresh_plan_fallback: true` |
-| Re-run (attempt > 1) | Fresh plan, only if the commit is still the head of its branch. Re-runs on tags, PR refs, or superseded commits are refused. |
+| Re-run (attempt > 1) | Fresh plan |
 
 The planfile is downloaded outside the checkout, and its `plan-metadata.json`
 must name the same `stack` and `workspace` strings as the apply. A `tfplan`
 already in the stack directory is never treated as the reviewed plan.
 
-A fresh apply on a re-run of an older commit would apply a superseded tree and
-roll back everything merged since. The head check prevents that.
+Every fresh apply (any row above that says "fresh plan") first checks that the
+run's commit is still the head of its branch. Applying an older commit's tree
+with `-auto-approve` would roll back everything merged since, so:
+
+- On a branch ref, a fresh apply of a commit that is no longer the branch head
+  is refused, on any attempt. The newer run applies the newer tree.
+- On a non-branch ref (tag, PR merge ref), there is no head to compare against.
+  The first attempt applies with a warning; re-runs are refused.
+- Planfile applies skip this check. Terraform itself rejects a planfile whose
+  state has changed since it was made.
 
 ### resolve-plan-run
 

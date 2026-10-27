@@ -7,7 +7,7 @@
 #   render            print the plan comment body to stdout (no CI/VCS calls)
 #   comment           render the plan comment and upsert it on the current PR
 #   decide            emit whether apply should fetch the planfile artifact
-#   apply             stale re-run guard, plan-source decision, apply,
+#   apply             plan-source decision, superseded-tree guard, apply,
 #                     apply-result comment on the commit's PR
 #   resolve-plan-run  find the plan run for the PR that produced this commit
 #
@@ -121,7 +121,7 @@ decide_plan_source() {
   elif [[ "${attempt}" -gt 1 ]]; then
     # The stored plan reflects state before the failed attempt; applying it
     # risks "Saved plan is stale" or a partial roll-forward. The re-run applies
-    # a fresh plan instead, which the stale re-run guard limits to the branch head.
+    # a fresh plan instead, which superseded_guard limits to the branch head.
     echo "fresh rerun"
   elif [[ "${has_planfile}" == "true" ]]; then
     echo "planfile"
@@ -289,25 +289,35 @@ cmd_decide() {
   ci_output artifact_name "$(artifact_name "${TFPR_STACK}" "${TFPR_WORKSPACE}")"
 }
 
-# On attempt > 1 the stored planfile is skipped, so a re-run fresh-applies this
-# run's tree with -auto-approve. If the branch has moved on, that tree is
-# superseded: a re-run of an older merge once applied a superseded tree and
-# destroyed newer resources. Fail closed: only the branch head may re-run.
-stale_rerun_guard() {
-  local ref sha head attempt
+# A fresh apply runs -auto-approve on this commit's tree. If the branch has
+# moved on, that tree is superseded and applying it rolls back everything
+# merged since: a re-run of an older merge once applied a superseded tree and
+# destroyed newer resources. Fail closed: only the branch head may fresh-apply.
+# Planfile applies skip this; terraform rejects a planfile whose state moved.
+# superseded_guard ATTEMPT -> 0 ok, 1 superseded, 2 cannot verify
+superseded_guard() {
+  local attempt="$1" ref sha head branch
   ref="$(ci_ref)"
   sha="$(ci_sha)"
-  attempt="$(ci_attempt)"
   if [[ "${ref}" != refs/heads/* ]]; then
-    ci_error "Re-run apply refused: cannot verify staleness for non-branch ref '${ref}'. Trigger a fresh run instead."
-    return 1
+    if [[ "${attempt}" -gt 1 ]]; then
+      ci_error "Re-run apply refused: cannot verify staleness for non-branch ref '${ref}'. Trigger a fresh run instead."
+      return 2
+    fi
+    # First attempt on a tag or other ref: nothing to compare against.
+    ci_warn "Fresh apply of non-branch ref '${ref}': there is no branch head to compare against, so the superseded-tree check is skipped."
+    return 0
   fi
-  head="$(vcs_branch_head "${ref#refs/heads/}")" || return 1
+  branch="${ref#refs/heads/}"
+  if ! head="$(vcs_branch_head "${branch}")"; then
+    ci_error "Fresh apply refused: could not read the head of '${branch}' to rule out applying a superseded tree."
+    return 2
+  fi
   if [[ "${head}" != "${sha}" ]]; then
-    ci_error "Re-run apply refused (attempt=${attempt}): commit ${sha} is no longer the head of '${ref#refs/heads/}' (now ${head}). A fresh-plan apply of a superseded tree would roll back later merges. Re-run the newest merge run for this stack, or land the change via a PR."
+    ci_error "Fresh apply refused (attempt=${attempt}): commit ${sha} is no longer the head of '${branch}' (now ${head}). Applying a superseded tree with -auto-approve would roll back later merges. Let the newest run for this branch apply, or re-run that one."
     return 1
   fi
-  echo "Re-run staleness check passed: ${sha} is still the head of '${ref#refs/heads/}'."
+  echo "Superseded-tree check passed: ${sha} is the head of '${branch}'."
 }
 
 terraform_version() { terraform version -json 2> /dev/null | jq -r .terraform_version || echo unknown; }
@@ -350,30 +360,33 @@ cmd_apply() {
   load_ci
   load_vcs
   local use_planfile="${TFPR_USE_PLANFILE:-false}" allow="${TFPR_ALLOW_FRESH_PLAN_FALLBACK:-false}"
-  local attempt source=none reason="" code=0 has_planfile=false used=false
+  local attempt source reason code=0 guard=0 has_planfile=false used=false
   attempt="$(ci_attempt)"
 
-  if [[ "${attempt}" -gt 1 ]] && ! stale_rerun_guard; then
-    reason="stale-rerun"
-    code=1
-  else
-    reviewed_planfile && has_planfile=true
-    read -r source reason <<< "$(decide_plan_source "${use_planfile}" "${attempt}" "${has_planfile}" "${allow}")"
-    case "${source}:${reason}" in
-      fresh:rerun)
-        ci_warn "Re-run detected (attempt=${attempt}); skipping stored planfile to avoid stale-plan apply" ;;
-      fresh:missing-artifact)
-        ci_warn "Planfile artifact requested but not found; falling back to fresh-plan apply (allow_fresh_plan_fallback=true)" ;;
-      none:missing-artifact)
-        ci_error "Planfile artifact '$(artifact_name "${TFPR_STACK}" "${TFPR_WORKSPACE}")' not found; refusing to apply a fresh, unreviewed plan. It may have expired (the plan action's retention_days input sets how long it is kept) or the plan run did not upload it. Re-run the plan, or set allow_fresh_plan_fallback=true to apply a fresh plan instead."
-        code=1 ;;
-      planfile:)
-        echo "Found planfile from artifact; will apply it" ;;
+  reviewed_planfile && has_planfile=true
+  read -r source reason <<< "$(decide_plan_source "${use_planfile}" "${attempt}" "${has_planfile}" "${allow}")"
+  case "${source}:${reason}" in
+    fresh:rerun)
+      ci_warn "Re-run detected (attempt=${attempt}); skipping stored planfile to avoid stale-plan apply" ;;
+    fresh:missing-artifact)
+      ci_warn "Planfile artifact requested but not found; falling back to fresh-plan apply (allow_fresh_plan_fallback=true)" ;;
+    none:missing-artifact)
+      ci_error "Planfile artifact '$(artifact_name "${TFPR_STACK}" "${TFPR_WORKSPACE}")' not found; refusing to apply a fresh, unreviewed plan. It may have expired (the plan action's retention_days input sets how long it is kept) or the plan run did not upload it. Re-run the plan, or set allow_fresh_plan_fallback=true to apply a fresh plan instead."
+      code=1 ;;
+    planfile:)
+      echo "Found planfile from artifact; will apply it" ;;
+  esac
+
+  if [[ "${source}" == "fresh" ]]; then
+    superseded_guard "${attempt}" || guard=$?
+    case "${guard}" in
+      1) source=none reason=superseded code=1 ;;
+      2) source=none reason=unverified-ref code=1 ;;
     esac
-    # A partial-apply failure must propagate so downstream jobs see it.
-    if [[ "${source}" != "none" ]]; then
-      terraform_apply "${source}" || code=$?
-    fi
+  fi
+  # A partial-apply failure must propagate so downstream jobs see it.
+  if [[ "${source}" != "none" ]]; then
+    terraform_apply "${source}" || code=$?
   fi
 
   [[ "${source}" == "planfile" ]] && used=true
@@ -413,7 +426,8 @@ post_apply_comment() {
     fresh:rerun) source_line="fresh plan (rerun bypass)" ;;
     fresh:missing-artifact) source_line="fresh plan (artifact missing)" ;;
     none:missing-artifact) source_line="none (planfile artifact missing; fresh-plan fallback not allowed)" ;;
-    none:stale-rerun) source_line="none (stale re-run refused)" ;;
+    none:superseded) source_line="none (superseded tree refused)" ;;
+    none:unverified-ref) source_line="none (could not verify the branch head)" ;;
     *) source_line="fresh plan" ;;
   esac
 

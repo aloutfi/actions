@@ -3,7 +3,8 @@ description: >-
   Apply the reviewed planfile from the plan action's artifact, or a fresh plan
   when no planfile is requested or the run is a re-run. A requested planfile
   that is missing fails the apply unless allow_fresh_plan_fallback is true.
-  Re-runs are refused unless the run's commit is still the head of its branch.
+  A fresh apply is refused unless the run's commit is still the head of its
+  branch (first attempts on non-branch refs are allowed with a warning).
   Provider credentials come from job-level `env:` (see the plan action).
 
 inputs:
@@ -56,7 +57,7 @@ outputs:
     description: "'true' | 'false'"
     value: ${{ steps.apply.outputs.used_plan_artifact }}
   fallback_reason:
-    description: "'rerun' | 'missing-artifact' | 'no-artifact-requested' | 'stale-rerun' | ''"
+    description: "'rerun' | 'missing-artifact' | 'no-artifact-requested' | 'superseded' | 'unverified-ref' | ''"
     value: ${{ steps.apply.outputs.fallback_reason }}
 
 runs:

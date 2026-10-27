@@ -221,6 +221,50 @@ run_tfpr decide TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact
 assert_eq "decide empties the artifact dir" "absent" "$([[ -e "${ws}/artifact" ]] && echo present || echo absent)"
 assert_has "decide requests download" "${OUTPUTS}" "download=true"
 
+# Superseded-tree guard: every fresh apply must be the branch head.
+new_ws
+run_tfpr apply
+assert_eq "first attempt at branch head: exit code" 0 "${RC}"
+assert_has "first attempt at branch head: checks head" "${CALLS}" "gh api repos/o/r/git/ref/heads/main"
+assert_has "first attempt at branch head: applies" "${CALLS}" "-auto-approve"
+
+new_ws
+run_tfpr apply FAKE_BRANCH_HEAD=def
+assert_eq "first attempt, branch moved: refused" 1 "${RC}"
+assert_has "first attempt, branch moved: error" "${OUT}" "::error::Fresh apply refused (attempt=1): commit abc is no longer the head of 'main' (now def)"
+assert_lacks "first attempt, branch moved: no apply" "${CALLS}" "terraform apply"
+assert_has "first attempt, branch moved: reason" "${OUTPUTS}" "fallback_reason=superseded"
+
+new_ws
+run_tfpr apply GITHUB_RUN_ATTEMPT=2 TFPR_USE_PLANFILE=true
+assert_eq "re-run at branch head: exit code" 0 "${RC}"
+assert_has "re-run at branch head: fresh apply" "${CALLS}" "-auto-approve"
+assert_has "re-run at branch head: reason" "${OUTPUTS}" "fallback_reason=rerun"
+
+new_ws
+run_tfpr apply GITHUB_RUN_ATTEMPT=2 FAKE_BRANCH_HEAD=def
+assert_eq "re-run, branch moved: refused" 1 "${RC}"
+assert_lacks "re-run, branch moved: no apply" "${CALLS}" "terraform apply"
+
+new_ws
+run_tfpr apply GITHUB_REF=refs/tags/v1
+assert_eq "non-branch first attempt: allowed" 0 "${RC}"
+assert_has "non-branch first attempt: warns" "${OUT}" "::warning::Fresh apply of non-branch ref 'refs/tags/v1'"
+assert_has "non-branch first attempt: applies" "${CALLS}" "-auto-approve"
+assert_lacks "non-branch first attempt: no head lookup" "${CALLS}" "git/ref/heads"
+
+new_ws
+run_tfpr apply GITHUB_REF=refs/tags/v1 GITHUB_RUN_ATTEMPT=2
+assert_eq "non-branch re-run: refused" 1 "${RC}"
+assert_has "non-branch re-run: reason" "${OUTPUTS}" "fallback_reason=unverified-ref"
+assert_lacks "non-branch re-run: no apply" "${CALLS}" "terraform apply"
+
+new_ws
+plan_artifact stack default
+run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact FAKE_BRANCH_HEAD=def
+assert_eq "planfile apply skips the guard: exit code" 0 "${RC}"
+assert_lacks "planfile apply skips the guard: no head lookup" "${CALLS}" "git/ref/heads"
+
 # --- action wrappers (static checks) ----------------------------------------
 # assert_yaml NAME FILE LINE: FILE contains LINE (whitespace-trimmed) verbatim.
 # LINE is literal GitHub expression text, so callers single-quote it.
