@@ -155,7 +155,7 @@ func TestGoldensMatchSchema(t *testing.T) {
 		Redaction: Redaction{Mode: "filter"},
 	}, []Unit{{
 		Path: ".", ExitCode: intp(2), Status: StatusChanges, Counts: Counts{Create: 1},
-		Resources: []Resource{{Address: "a.b", PreviousAddress: "a.c", Action: "update", Importing: true, Moved: true, Reason: "r", Mode: "managed"}},
+		Resources: []Resource{{Address: "a.b", PreviousAddress: "a.c", Action: "update", Importing: true, Moved: true, Forget: true, Reason: "r", Mode: "managed"}},
 		Outputs:   []Output{{Name: "o", Action: "create", Sensitive: true}},
 		TextChars: intp(3), Fingerprint: "sha256:x", Planfile: Planfile{Present: true, SHA256: "y"}, Dependencies: []string{},
 	}})

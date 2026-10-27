@@ -150,6 +150,7 @@
               "action": { "enum": ["create", "update", "delete", "replace", "forget", "read", "move", "import"] },
               "importing": { "type": "boolean" },
               "moved": { "type": "boolean" },
+              "forget": { "type": "boolean", "description": "the old object is forgotten, not destroyed: actions [forget, create], counted as a create and a forget" },
               "reason": { "type": "string", "description": "terraform action_reason, e.g. replace_because_tainted" },
               "mode": { "enum": ["managed", "data"] }
             }

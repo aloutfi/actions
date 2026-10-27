@@ -135,6 +135,7 @@ type Resource struct {
 	Action          string `json:"action"`
 	Importing       bool   `json:"importing,omitempty"`
 	Moved           bool   `json:"moved,omitempty"`
+	Forget          bool   `json:"forget,omitempty"` // the old object is forgotten, not destroyed
 	Reason          string `json:"reason,omitempty"`
 	Mode            string `json:"mode,omitempty"`
 }
@@ -275,13 +276,20 @@ func DeriveUnit(in UnitInput) (Unit, string, error) {
 			continue // no-op
 		}
 		u.Counts.add(action)
+		// ["forget","create"] (or ["create","forget"]): a replacement whose old
+		// object is forgotten (lifecycle destroy = false). It is a create and a
+		// forget.
+		forget := action != "forget" && slices.Contains(rc.Change.Actions, "forget")
+		if forget {
+			u.Counts.Forget++
+		}
 		if importing {
 			u.Counts.Import++
 		}
 		if moved {
 			u.Counts.Move++
 		}
-		r := Resource{Address: rc.Address, Action: action, Importing: importing, Moved: moved, Reason: rc.ActionReason, Mode: rc.Mode}
+		r := Resource{Address: rc.Address, Action: action, Importing: importing, Moved: moved, Forget: forget, Reason: rc.ActionReason, Mode: rc.Mode}
 		if moved {
 			r.PreviousAddress = rc.PreviousAddress
 		}

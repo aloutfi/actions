@@ -219,3 +219,27 @@ func TestRecordCarriesNothingSensitive(t *testing.T) {
 		t.Errorf("record fields %v", fields)
 	}
 }
+
+// Terraform 1.16 plans a replacement under lifecycle { destroy = false } as
+// ["forget","create"] ("must be replaced, but the existing object will not be
+// destroyed"). It counts as a create and a forget, like the bash core did.
+func TestForgetWithCreate(t *testing.T) {
+	resources := rc("a.x", `["forget","create"]`, ``) + "," +
+		rc("a.y", `["create","forget"]`, ``) + "," + rc("a.z", `["forget"]`, ``)
+	u, _, err := DeriveUnit(UnitInput{Path: ".", PlanJSON: planDoc(resources, "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Counts{Create: 2, Forget: 3}); u.Counts != want {
+		t.Errorf("counts %+v, want %+v", u.Counts, want)
+	}
+	if r := u.Resources[0]; r.Action != "create" || !r.Forget {
+		t.Errorf("resource %+v", r)
+	}
+	if u.Resources[2].Forget {
+		t.Error("a plain forget is not flagged as forget-with-create")
+	}
+	if s := StatsOf(u.Counts); s.Creates != 2 || s.Forgets != 3 || !s.HasChanges() {
+		t.Errorf("stats %+v", s)
+	}
+}
