@@ -272,7 +272,11 @@ assert_eq "plan retention_days default" 'default: "7"' \
 
 # shellcheck disable=SC2016
 assert_yaml "the plan comment runs when the plan failed, not when cancelled" plan/action.yml \
-  "if: \${{ !cancelled() && github.event_name == 'pull_request' }}"
+  'if: ${{ !cancelled() }}'
+# shellcheck disable=SC2016
+assert_yaml "the comment links the plan.txt artifact" plan/action.yml \
+  'TFPR_PLAN_TXT_URL: ${{ steps.plan-text-upload.outputs.artifact-url }}'
+assert_yaml "plan.txt is uploaded unzipped" plan/action.yml 'archive: false'
 
 
 # shellcheck disable=SC2016
