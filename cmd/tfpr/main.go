@@ -12,10 +12,13 @@
 //	                  comment from the plan dir and upsert it on the current PR; a
 //	                  failed or missing plan posts "plan failed". Outside a PR it
 //	                  writes only the summary
-//	decide            emit whether apply should fetch the planfile artifact
-//	apply             plan-source decision, superseded-tree guard, apply,
-//	                  apply-result comment on the commit's PR
-//	resolve-plan-run  find the plan run for the PR that produced this commit
+//	gate              merge time, repo-host token only: decide whether to apply
+//	                  (superseded-tree guard; opt-in skip on no-op) and write
+//	                  decision.json; a superseded commit is a clean skip
+//	apply             gate (or its decision.json), terraform apply with the
+//	                  reviewed planfile or a fresh plan, then report
+//	report            post the apply result (TFPR_APPLY_EXIT_CODE, TFPR_APPLY_LOG)
+//	                  on the PR that merged this commit: "bring your own apply"
 //
 // Configuration comes from TFPR_* environment variables:
 //
@@ -45,14 +48,18 @@
 //	                                lines in the comment (false)
 //	TFPR_SUMMARY                    comment: write the job summary (true)
 //	TFPR_SUMMARY_FILE               comment, outside a supported CI: summary file
-//	TFPR_COMMENT_AUTHOR             comment/apply: login allowed to own the comment
-//	TFPR_USE_PLANFILE               decide/apply: apply the stored planfile (false)
+//	TFPR_COMMENT_AUTHOR             comment/gate/apply/report: login that owns the comments
+//	TFPR_SKIP_NOOP                  gate/apply: skip the apply when the PR's reviewed plan
+//	                                was a no-op and the merged tree is the planned tree (false)
+//	TFPR_USE_PLANFILE               gate/apply: apply the stored planfile (false)
 //	TFPR_ALLOW_FRESH_PLAN_FALLBACK  apply: fresh-plan if the planfile is missing (false)
-//	TFPR_PLAN_DIR                   decide/apply: directory the planfile artifact is
-//	                                downloaded into; decide empties it first
-//	TFPR_PLAN_RUN_ID                apply: run that produced the planfile (comment only)
+//	TFPR_PLAN_DIR                   gate/apply: directory the planfile artifact is
+//	                                downloaded into; gate empties it first
+//	TFPR_PLAN_RUN_ID                apply: run that produced the planfile (default: the
+//	                                run named in the PR's plan record)
 //	TFPR_LOCK_TIMEOUT               apply: -lock-timeout (5m)
-//	TFPR_PLAN_WORKFLOW              resolve-plan-run: plan workflow file name
+//	TFPR_APPLY_EXIT_CODE            report: your terraform apply's exit code
+//	TFPR_APPLY_LOG                  report: your terraform apply's output, scrubbed (optional)
 //	TFPR_VCS                        repo host: github, azure or none (default: where
 //	                                the CI says the repo lives, else github)
 //	TFPR_REPO                       repo id for the repo host (the CI's repository):
@@ -143,13 +150,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	a.filter = redact.Configured(stderr, a.logIssue)
 	a.tfBin, a.tfErr = resolveExecutable(envOr("TFPR_TF_BIN", "terraform"))
 	commands := map[string]func() error{
-		"plan":             a.plan,
-		"derive":           a.derive,
-		"render":           a.render,
-		"comment":          a.comment,
-		"decide":           a.decide,
-		"apply":            a.apply,
-		"resolve-plan-run": a.resolvePlanRun,
+		"plan":    a.plan,
+		"derive":  a.derive,
+		"render":  a.render,
+		"comment": a.comment,
+		"gate":    a.gate,
+		"apply":   a.apply,
+		"report":  a.report,
 	}
 	cmd := ""
 	if len(args) > 0 {
@@ -161,7 +168,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	f, ok := commands[cmd]
 	if !ok {
-		return a.exit(errors.New("usage: tfpr plan|derive|render|comment|decide|apply|resolve-plan-run"))
+		return a.exit(errors.New("usage: tfpr plan|derive|render|comment|gate|apply|report|--version"))
 	}
 	return a.exit(f())
 }
@@ -549,21 +556,6 @@ func (a *app) postPlanComment(v vcs.VCS, pr string, r core.PlanResult, marker, r
 	return nil
 }
 
-func (a *app) decide() error {
-	a.loadCI()
-	// Start empty so apply only ever sees what this download put there.
-	if dir := os.Getenv("TFPR_PLAN_DIR"); dir != "" {
-		if err := os.RemoveAll(dir); err != nil {
-			return err
-		}
-	}
-	d := core.DecidePlanSource(os.Getenv("TFPR_USE_PLANFILE") == "true", a.ctx.Attempt, true, false)
-	return a.outputs(
-		core.Field{Name: "download", Value: strconv.FormatBool(d.Source == core.SourcePlanfile)},
-		core.Field{Name: "artifact_name", Value: core.ArtifactName(a.stack, a.workspace)},
-	)
-}
-
 // reviewedPlanfile reports whether TFPR_PLAN_DIR holds a downloaded planfile
 // whose plan-metadata.json is for this stack and workspace. A tfplan already
 // in the stack directory (say, from an earlier plan in the same job) never
@@ -591,52 +583,55 @@ func (a *app) reviewedPlanfile() bool {
 	return true
 }
 
+// apply is gate, then terraform apply, then report, for runs where tfpr
+// runs terraform (the GitHub composite action). It acts on the gate's
+// decision.json when a gate step wrote one for this commit, and gates
+// itself otherwise. A superseded commit is a clean skip.
 func (a *app) apply() error {
 	a.loadCI()
 	v, err := a.loadVCS()
 	if err != nil {
 		return err
 	}
-	usePlanfile := os.Getenv("TFPR_USE_PLANFILE") == "true"
-	allow := os.Getenv("TFPR_ALLOW_FRESH_PLAN_FALLBACK") == "true"
-	attempt := a.ctx.Attempt
-
-	d := core.DecidePlanSource(usePlanfile, attempt, a.reviewedPlanfile(), allow)
-	if t := core.DescribeDecision(d, attempt, core.ArtifactName(a.stack, a.workspace), ""); t.Log != "" {
-		a.log(t.Level, t.Log)
-	}
-	code := 0
-	if d.Source == core.SourceNone {
-		code = 1
-	}
-
-	if d.Source == core.SourceFresh {
-		branchHead := func(branch string) (string, error) {
-			head, err := v.BranchHead(branch)
-			if err != nil {
-				fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
-			}
-			return head, err
-		}
-		g := core.SupersededGuard(a.ctx.Ref, a.ctx.SHA, attempt, branchHead)
-		a.log(g.Level, g.Message)
-		switch g.Code {
-		case core.GuardSuperseded:
-			d, code = core.Decision{Source: core.SourceNone, Reason: "superseded"}, 1
-		case core.GuardUnverified:
-			d, code = core.Decision{Source: core.SourceNone, Reason: "unverified-ref"}, 1
+	g, ok := a.readDecision()
+	if !ok {
+		g = a.runGate(v)
+		if err := a.writeDecision(g); err != nil {
+			a.ci.Log(ci.Warning, "Could not write decision.json: "+err.Error())
 		}
 	}
-	// A partial-apply failure must propagate so downstream jobs see it.
-	if d.Source != core.SourceNone {
-		code = a.terraformApply(d.Source)
+	r := core.ApplyReport{Gate: g, PlanRun: envOr("TFPR_PLAN_RUN_ID", g.PlanRun)}
+	code, reason := 0, g.Reason
+	switch g.Action {
+	case core.GateRefuse:
+		code = 1 // the gate logged why
+	case core.GateApply:
+		usePlanfile := os.Getenv("TFPR_USE_PLANFILE") == "true"
+		allow := os.Getenv("TFPR_ALLOW_FRESH_PLAN_FALLBACK") == "true"
+		d := core.DecidePlanSource(usePlanfile, g.Attempt, a.reviewedPlanfile(), allow)
+		if t := core.DescribeDecision(d, g.Attempt, g.Artifact, ""); t.Log != "" {
+			a.log(t.Level, t.Log)
+		}
+		r.Source, reason = d, d.Reason
+		if d.Source == core.SourceNone {
+			code = 1
+		} else {
+			// A partial-apply failure must propagate so downstream jobs see it.
+			code = a.terraformApply(d.Source)
+			r.BinaryVersion = a.terraformVersion("")
+		}
 	}
+	r.ExitCode = code
 
-	used := d.Source == core.SourcePlanfile
+	exit := strconv.Itoa(code)
+	if g.Action == core.GateSkip {
+		exit = ""
+	}
 	if err := a.outputs(
-		core.Field{Name: "apply_exit_code", Value: strconv.Itoa(code)},
-		core.Field{Name: "used_plan_artifact", Value: strconv.FormatBool(used)},
-		core.Field{Name: "fallback_reason", Value: d.Reason},
+		core.Field{Name: "action", Value: g.Action},
+		core.Field{Name: "apply_exit_code", Value: exit},
+		core.Field{Name: "used_plan_artifact", Value: strconv.FormatBool(r.Source.Source == core.SourcePlanfile)},
+		core.Field{Name: "fallback_reason", Value: reason},
 	); err != nil {
 		return err
 	}
@@ -644,7 +639,7 @@ func (a *app) apply() error {
 	// A filter failure fails the step, but code stays terraform's: it is what
 	// the outputs and the comment report.
 	stepFailed := false
-	if err := a.postApplyComment(v, d, code, used, usePlanfile, attempt); errors.Is(err, redact.ErrFailed) || errors.Is(err, vcs.ErrNoAuthor) {
+	if err := a.publishApply(v, r); errors.Is(err, redact.ErrFailed) || errors.Is(err, vcs.ErrNoAuthor) {
 		a.ci.Log(ci.Error, err.Error()+"; nothing was posted")
 		stepFailed = true
 	} else if err != nil {
@@ -695,90 +690,6 @@ func (a *app) terraformApply(source string) int {
 		}
 	}
 	return 0
-}
-
-func (a *app) postApplyComment(v vcs.VCS, d core.Decision, code int, used, usePlanfile bool, attempt int) error {
-	sha := a.ctx.SHA
-	// Not every apply comes from a PR merge (drift, manual dispatch); skip quietly.
-	prs, err := v.PRsForCommit(sha, a.ctx.Ref)
-	if err != nil || len(prs) == 0 {
-		fmt.Fprintf(a.stdout, "No PR associated with %s; skipping apply-result comment.\n", sha)
-		return nil
-	}
-	pr := strconv.Itoa(prs[0].Number)
-	artifact := ""
-	if usePlanfile && core.IsFirstAttempt(attempt) {
-		artifact = core.ArtifactName(a.stack, a.workspace)
-	}
-	raw, err := core.RenderApply(core.ApplyComment{
-		Stack: a.stack, Workspace: a.workspace,
-		Decision: d, ExitCode: code, UsedPlanfile: used,
-		Artifact: artifact, PlanRun: os.Getenv("TFPR_PLAN_RUN_ID"),
-		RunID: a.ctx.RunID, RunURL: a.ctx.RunURL, SHA: sha,
-		TerraformVersion: a.terraformVersion(""),
-	})
-	if err != nil {
-		return err
-	}
-	body, err := a.filter.Apply(raw)
-	if err != nil {
-		return err
-	}
-	// A failed apply needs attention: its thread stays active.
-	msg, err := v.UpsertComment(vcs.Comment{PR: pr, Marker: core.ApplyMarker(a.stack, a.workspace), Body: body, Resolved: code == 0})
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(a.stdout, msg)
-	return nil
-}
-
-func (a *app) resolvePlanRun() error {
-	a.loadCI()
-	gh, ok := a.ci.(*ci.GitHub)
-	if !ok {
-		return errors.New("resolve-plan-run needs GitHub Actions (GITHUB_ACTIONS=true)")
-	}
-	v, err := a.loadVCS()
-	if err != nil {
-		return err
-	}
-	workflow := os.Getenv("TFPR_PLAN_WORKFLOW")
-	if workflow == "" {
-		return errors.New("TFPR_PLAN_WORKFLOW is required")
-	}
-	attempt, sha := a.ctx.Attempt, a.ctx.SHA
-	var prNum, runID string
-
-	if !core.IsFirstAttempt(attempt) {
-		// Re-run: the stored plan reflects state before the failed apply. Emit
-		// nothing so apply takes the fresh-plan path.
-		a.ci.Log(ci.Notice, fmt.Sprintf("Re-run detected (attempt=%d); fresh-plan fallback", attempt))
-	} else {
-		prs, err := v.PRsForCommit(sha, a.ctx.Ref)
-		if err != nil {
-			return err
-		}
-		switch len(prs) {
-		case 0:
-			a.ci.Log(ci.Notice, fmt.Sprintf("No PR associated with %s; direct-push or hotfix path; fresh-plan fallback", sha))
-		case 1:
-			head := prs[0].HeadSHA
-			prNum = strconv.Itoa(prs[0].Number)
-			if runID, err = gh.FindPlanRun(a.repo(), workflow, head); err != nil {
-				return err
-			}
-			if runID == "" {
-				a.ci.Log(ci.Notice, fmt.Sprintf("No successful '%s' run found for head_sha=%s (PR #%s); fresh-plan fallback", workflow, head, prNum))
-			} else {
-				fmt.Fprintf(a.stdout, "Resolved PR #%s head=%s → plan run=%s\n", prNum, head, runID)
-			}
-		default:
-			// Multiple PRs (merge queue, cherry-pick): don't guess.
-			a.ci.Log(ci.Warning, fmt.Sprintf("Multiple PRs match %s (count=%d); fresh-plan fallback to avoid ambiguity", sha, len(prs)))
-		}
-	}
-	return a.outputs(core.Field{Name: "run_id", Value: runID}, core.Field{Name: "pr_number", Value: prNum})
 }
 
 // resolveExecutable turns name into a path that does not depend on the

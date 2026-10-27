@@ -177,7 +177,7 @@ run_tfpr() {
     GITHUB_ACTIONS=true GITHUB_OUTPUT="${sandbox}/outputs" GITHUB_REPOSITORY=o/r \
     GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_SERVER_URL=https://github.example \
     GITHUB_SHA=abc GITHUB_REF=refs/heads/main GITHUB_ACTOR=me RUNNER_NAME=r \
-    GITHUB_EVENT_NAME=push TFPR_STACK=stack TFPR_WORKSPACE=default \
+    GITHUB_EVENT_NAME=push TFPR_STACK=stack TFPR_WORKSPACE=default GITHUB_API_URL=http://127.0.0.1:9 \
     "$@" "${tfpr}" "${cmd}") > "${sandbox}/stdout" 2>&1 || RC=$?
   OUT="$(cat "${sandbox}/stdout")"
   OUTPUTS="$(cat "${sandbox}/outputs")"
@@ -243,14 +243,17 @@ while IFS=$'\037' read -r fixture expected; do
     "$(sed -n '2,13s/^[a-z_]*=//p' "${sandbox}/outputs" | paste -sd '|' -)"
 done < <(cases plan_stats.tsv)
 
-# artifact_name.tsv: decide names the artifact that apply downloads.
+# artifact_name.tsv: gate names the artifact that apply downloads. A first
+# attempt on a tag passes the gate without a branch-head lookup.
 while IFS=$'\037' read -r name stack workspace expected; do
   new_ws
-  run_tfpr decide TFPR_STACK="${stack}" TFPR_WORKSPACE="${workspace}"
+  mkdir -p "${ws}/${stack}"
+  run_tfpr gate TFPR_STACK="${stack}" TFPR_WORKSPACE="${workspace}" GITHUB_REF=refs/tags/v1
   assert_has "artifact_name: ${name}" "${OUTPUTS}" "artifact_name=${expected}"
 done < <(cases artifact_name.tsv)
 
 # same_stack.tsv: apply takes the reviewed planfile only when its metadata
+# names this stack. A first attempt on a tag needs no branch-head lookup.
 # names this stack. Planfile applies skip the branch-head lookup, and the
 # unreachable API makes the apply-result comment skip itself.
 while IFS=$'\037' read -r name metadata_stack tfpr_stack same; do
@@ -258,8 +261,7 @@ while IFS=$'\037' read -r name metadata_stack tfpr_stack same; do
   mkdir -p "${ws}/artifact"
   echo "reviewed plan" > "${ws}/artifact/tfplan"
   printf '{"stack":"%s","workspace":"default"}\n' "${metadata_stack}" > "${ws}/artifact/plan-metadata.json"
-  run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact TFPR_STACK="${tfpr_stack}" \
-    GITHUB_API_URL=http://127.0.0.1:9
+  run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact TFPR_STACK="${tfpr_stack}" GITHUB_REF=refs/tags/v1
   if [[ "${same}" == "true" ]]; then
     assert_has "same_stack: ${name}: applies the planfile" "${CALLS}" "-lock-timeout=5m tfplan"
   else
@@ -271,16 +273,21 @@ done < <(cases same_stack.tsv)
 new_ws
 mkdir -p "${ws}/artifact"
 echo "stale" > "${ws}/artifact/tfplan"
-run_tfpr decide TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact
-assert_eq "decide empties the artifact dir" "absent" "$([[ -e "${ws}/artifact" ]] && echo present || echo absent)"
-assert_has "decide requests download" "${OUTPUTS}" "download=true"
+run_tfpr gate TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact GITHUB_REF=refs/tags/v1
+assert_eq "gate empties the artifact dir" "absent" "$([[ -e "${ws}/artifact" ]] && echo present || echo absent)"
+assert_has "gate requests the download" "${OUTPUTS}" "download=true"
+assert_has "gate writes decision.json" "$(cat "${ws}/stack/.tfpr/decision.json")" '"schema": "tfpr/decision@1"'
 
-run_tfpr decide TFPR_USE_PLANFILE=true GITHUB_RUN_ATTEMPT=2
-assert_has "decide on a re-run skips the download" "${OUTPUTS}" "download=false"
+run_tfpr gate TFPR_USE_PLANFILE=true GITHUB_RUN_ATTEMPT=2 GITHUB_REF=refs/tags/v1
+assert_eq "gate on a re-run of a tag: refused" 1 "${RC}"
+assert_has "gate on a re-run: no download" "${OUTPUTS}" "download=false"
+
+run_tfpr --version
+assert_eq "--version" "tfpr dev" "${OUT/tfpr v*/tfpr dev}"
 
 run_tfpr nonsense
 assert_eq "unknown command: exit code" 1 "${RC}"
-assert_has "unknown command: usage" "${OUT}" "usage: tfpr plan|derive|render|comment|decide|apply|resolve-plan-run"
+assert_has "unknown command: usage" "${OUT}" "usage: tfpr plan|derive|render|comment|gate|apply|report|--version"
 
 # --- action wrappers (static checks) ----------------------------------------
 # assert_yaml NAME FILE LINE: FILE contains LINE (whitespace-trimmed) verbatim.

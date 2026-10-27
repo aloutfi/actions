@@ -241,23 +241,3 @@ func (i *inert) Close() error {
 	}
 	return nil
 }
-
-// FindPlanRun is the id of the newest successful run of workflow (a file
-// name) for headSHA in repo, or "". It queries GitHub Actions, so it lives
-// here rather than on the repo host; resolve-plan-run is its only caller.
-func (g *GitHub) FindPlanRun(repo, workflow, headSHA string) (string, error) {
-	var runs struct {
-		WorkflowRuns []struct {
-			ID int64 `json:"id"`
-		} `json:"workflow_runs"`
-	}
-	q := url.Values{"head_sha": {headSHA}, "status": {"success"}, "per_page": {"1"}}
-	path := fmt.Sprintf("/repos/%s/actions/workflows/%s/runs?%s", repo, url.PathEscape(workflow), q.Encode())
-	if _, err := g.api.Do(http.MethodGet, path, nil, &runs); err != nil {
-		return "", err
-	}
-	if len(runs.WorkflowRuns) == 0 {
-		return "", nil
-	}
-	return strconv.FormatInt(runs.WorkflowRuns[0].ID, 10), nil
-}

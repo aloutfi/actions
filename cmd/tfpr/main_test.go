@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"encoding/json"
 	"flag"
@@ -25,7 +26,7 @@ type fakeGitHub struct {
 	t          *testing.T
 	pr         string // PR number associated with every commit; "" for none
 	branchHead string
-	planRun    string
+	headRun    string // html_url of the Actions run for the branch head, if any
 	failWrites bool
 	failList   bool   // listing comments fails
 	user       string // GET /user login; "" answers 403 like an app token
@@ -77,11 +78,11 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case strings.Contains(p, "/git/ref/heads/"):
 		io.WriteString(w, `{"object":{"sha":"`+f.branchHead+`"}}`)
-	case strings.Contains(p, "/actions/workflows/"):
-		if f.planRun == "" {
+	case p == "/repos/o/r/actions/runs":
+		if f.headRun == "" {
 			io.WriteString(w, `{"workflow_runs":[]}`)
 		} else {
-			io.WriteString(w, `{"workflow_runs":[{"id":`+f.planRun+`}]}`)
+			fmt.Fprintf(w, `{"workflow_runs":[{"html_url":%q,"head_sha":%q,"path":".github/workflows/apply.yml"}]}`, f.headRun, r.URL.Query().Get("head_sha"))
 		}
 	default:
 		f.t.Errorf("fake GitHub: unexpected call %s %s", r.Method, r.URL)
@@ -159,7 +160,8 @@ func newScenario(t *testing.T) *scenario {
 		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED",
 		"FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY", "TFPR_ADO_TOKEN", "TFPR_ACK", "TF_BUILD",
 		"BUILD_REPOSITORY_PROVIDER", "SYSTEM_COLLECTIONURI", "TFPR_GITHUB_API_URL", "BUILD_REPOSITORY_URI",
-		"SYSTEM_PULLREQUEST_PULLREQUESTID", "SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "SYSTEM_PULLREQUEST_SOURCECOMMITID",
+		"TFPR_SKIP_NOOP", "TFPR_APPLY_EXIT_CODE", "TFPR_APPLY_LOG", "TFPR_MODE", "TFPR_FAIL_ON_DRIFT", "SYSTEM_DEFINITIONID",
+		"GITHUB_WORKFLOW_REF", "BUILD_REPOSITORY_URI", "SYSTEM_PULLREQUEST_PULLREQUESTID", "SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "SYSTEM_PULLREQUEST_SOURCECOMMITID",
 		"AGENT_TEMPDIRECTORY"} {
 		env[k] = ""
 	}
@@ -538,19 +540,8 @@ func TestApplyPlanfileStackPathsMatch(t *testing.T) {
 	}
 }
 
-func TestDecide(t *testing.T) {
-	s := newScenario(t).set("TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact")
-	s.planArtifact("stack", "default")
-	r := s.run("decide")
-	_, err := os.Stat(filepath.Join(s.ws, "artifact"))
-	eq(t, "empties the artifact dir", true, os.IsNotExist(err))
-	eq(t, "outputs", "download=true\nartifact_name=tfplan-stack-default\n", r.outputs)
-
-	r = newScenario(t).set("TFPR_USE_PLANFILE", "true", "GITHUB_RUN_ATTEMPT", "2").run("decide")
-	has(t, "re-run: no download", r.outputs, "download=false")
-}
-
-// Superseded-tree guard: every fresh apply must be the branch head.
+// Superseded-tree guard: every apply must be the branch head. A superseded
+// commit is a clean skip: the run for the newer head applies.
 func TestApplySupersededGuard(t *testing.T) {
 	r := newScenario(t).run("apply")
 	eq(t, "branch head: exit code", 0, r.rc)
@@ -559,12 +550,13 @@ func TestApplySupersededGuard(t *testing.T) {
 	has(t, "branch head: says so", r.out, "Superseded-tree check passed: abc is the head of 'main'.")
 
 	s := newScenario(t)
-	s.gh.branchHead = "def"
+	s.gh.branchHead, s.gh.headRun = "def", "https://github.example/o/r/actions/runs/9"
 	r = s.run("apply")
-	eq(t, "branch moved: refused", 1, r.rc)
-	has(t, "branch moved: error", r.out, "::warning::Skipping the apply (attempt=1): commit abc is no longer the head of 'main' (now def)")
+	eq(t, "branch moved: clean skip", 0, r.rc)
+	has(t, "branch moved: warning", r.out, "::warning::Skipping the apply (attempt=1): commit abc is no longer the head of 'main' (now def)")
 	lacks(t, "branch moved: no apply", r.tf, "terraform apply")
-	has(t, "branch moved: reason", r.outputs, "fallback_reason=superseded")
+	has(t, "branch moved: outputs", r.outputs, "action=skip\napply_exit_code=\nused_plan_artifact=false\nfallback_reason=superseded\n")
+	has(t, "branch moved: links the newer run", r.api, "GET /repos/o/r/actions/runs?head_sha=def")
 	golden(t, "comments/apply-superseded.md", r.body)
 
 	r = newScenario(t).set("GITHUB_RUN_ATTEMPT", "2", "TFPR_USE_PLANFILE", "true").run("apply")
@@ -575,7 +567,7 @@ func TestApplySupersededGuard(t *testing.T) {
 	s = newScenario(t).set("GITHUB_RUN_ATTEMPT", "2")
 	s.gh.branchHead = "def"
 	r = s.run("apply")
-	eq(t, "re-run, branch moved: refused", 1, r.rc)
+	eq(t, "re-run, branch moved: clean skip", 0, r.rc)
 	lacks(t, "re-run, branch moved: no apply", r.tf, "terraform apply")
 
 	r = newScenario(t).set("GITHUB_REF", "refs/tags/v1").run("apply")
@@ -586,15 +578,19 @@ func TestApplySupersededGuard(t *testing.T) {
 
 	r = newScenario(t).set("GITHUB_REF", "refs/tags/v1", "GITHUB_RUN_ATTEMPT", "2").run("apply")
 	eq(t, "non-branch re-run: refused", 1, r.rc)
+	has(t, "non-branch re-run: reason", r.outputs, "action=refuse")
 	has(t, "non-branch re-run: reason", r.outputs, "fallback_reason=unverified-ref")
 	lacks(t, "non-branch re-run: no apply", r.tf, "terraform apply")
+	has(t, "non-branch re-run: reported", r.body, "refused")
 
+	// A reviewed planfile of a superseded commit is skipped too: the newer
+	// run applies the newer tree.
 	s = newScenario(t).set("TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact")
 	s.planArtifact("stack", "default")
 	s.gh.branchHead = "def"
 	r = s.run("apply")
-	eq(t, "planfile apply skips the guard: exit code", 0, r.rc)
-	lacks(t, "planfile apply skips the guard: no head lookup", r.api, "git/ref/heads")
+	eq(t, "planfile, branch moved: clean skip", 0, r.rc)
+	lacks(t, "planfile, branch moved: no apply", r.tf, "terraform apply")
 }
 
 func TestApplyWithoutPR(t *testing.T) {
@@ -605,43 +601,14 @@ func TestApplyWithoutPR(t *testing.T) {
 	has(t, "skips the comment", r.out, "No PR associated with abc; skipping apply-result comment.")
 }
 
-// resolve-plan-run: merge commit -> its PR -> that PR's plan run.
-func TestResolvePlanRun(t *testing.T) {
-	s := newScenario(t).set("TFPR_PLAN_WORKFLOW", "pr.yaml")
-	s.gh.planRun = "99"
-	r := s.run("resolve-plan-run")
-	eq(t, "exit code", 0, r.rc)
-	has(t, "queries the head sha", r.api, "/repos/o/r/actions/workflows/pr.yaml/runs?head_sha=headsha&per_page=1&status=success")
-	has(t, "says so", r.out, "Resolved PR #42 head=headsha → plan run=99")
-	eq(t, "outputs", "run_id=99\npr_number=42\n", r.outputs)
-
-	r = newScenario(t).set("TFPR_PLAN_WORKFLOW", "pr.yaml").run("resolve-plan-run")
-	has(t, "no run: notice", r.out, "::notice::No successful 'pr.yaml' run found for head_sha=headsha (PR #42)")
-	eq(t, "no run: outputs", "run_id=\npr_number=42\n", r.outputs)
-
-	s = newScenario(t).set("TFPR_PLAN_WORKFLOW", "pr.yaml")
-	s.gh.pr = ""
-	r = s.run("resolve-plan-run")
-	has(t, "no PR: notice", r.out, "::notice::No PR associated with abc")
-	eq(t, "no PR: outputs", "run_id=\npr_number=\n", r.outputs)
-
-	r = newScenario(t).set("TFPR_PLAN_WORKFLOW", "pr.yaml", "GITHUB_RUN_ATTEMPT", "2").run("resolve-plan-run")
-	has(t, "re-run: notice", r.out, "::notice::Re-run detected (attempt=2)")
-	eq(t, "re-run: no lookups", "", r.api)
-}
-
 // Outside a supported CI, outputs go to stdout and nothing calls the network.
 func TestLocal(t *testing.T) {
-	s := newScenario(t).set("GITHUB_ACTIONS", "")
-	r := s.run("decide")
-	eq(t, "decide: exit code", 0, r.rc)
-	has(t, "decide: outputs on stdout", r.out, "download=false\nartifact_name=tfplan-stack-default\n")
-
-	// No attempt counter: even a reviewed planfile is not trusted.
-	s = newScenario(t).set("GITHUB_ACTIONS", "", "TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact")
+	// No attempt counter and no ref: the gate can't verify anything.
+	s := newScenario(t).set("GITHUB_ACTIONS", "", "TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact")
 	s.planArtifact("stack", "default")
-	r = s.run("decide")
-	has(t, "decide: no download", r.out, "download=false")
+	r := s.run("gate")
+	eq(t, "gate: refuses", 1, r.rc)
+	has(t, "gate: outputs on stdout", r.out, "apply=false\naction=refuse\nreason=unverified-ref\n")
 	s.planArtifact("stack", "default")
 	r = s.run("apply")
 	eq(t, "planfile apply refused", 1, r.rc)
@@ -651,9 +618,6 @@ func TestLocal(t *testing.T) {
 	eq(t, "fresh apply refused", 1, r.rc)
 	lacks(t, "no apply", r.tf, "terraform apply")
 	eq(t, "no API calls", "", r.api)
-
-	r = newScenario(t).set("GITHUB_ACTIONS", "", "TFPR_PLAN_WORKFLOW", "pr.yaml").run("resolve-plan-run")
-	eq(t, "resolve-plan-run needs GitHub", 1, r.rc)
 }
 
 // The API token the actions pass never reaches terraform; a GITHUB_TOKEN the
@@ -758,7 +722,7 @@ func TestCommentFilterFailurePostsNothing(t *testing.T) {
 }
 
 func TestApplyCommentFilterFailure(t *testing.T) {
-	s := newScenario(t).set("TFPR_FILTER", `in=$(cat); case "$in" in *"Terraform Apply"*) exit 1;; esac; printf '%s\n' "$in"`)
+	s := newScenario(t).set("TFPR_FILTER", `in=$(cat); case "$in" in *"Terraform apply"*) exit 1;; esac; printf '%s\n' "$in"`)
 	r := s.run("apply")
 	eq(t, "exit code", 1, r.rc)
 	has(t, "says why", r.out, "nothing was posted")
@@ -1086,7 +1050,10 @@ func TestAzureApplyThreadStatus(t *testing.T) {
 
 // fakeAzureRepos records thread creation on an empty PR.
 type fakeAzureRepos struct {
-	mergedPR int // the PR that commit squash1 merged into main, if any
+	mergedPR int    // the PR that commit squash1 merged into main, if any
+	head     string // main's head; "" is squash1
+	threads  string // JSON array of PR 7's existing threads; "" is none
+	builds   string // JSON array for the builds API
 	mu       sync.Mutex
 	auth     string
 	created  map[string]any
@@ -1104,9 +1071,11 @@ func (f *fakeAzureRepos) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullrequestquery":
 		fmt.Fprintf(w, `{"results":[{"squash1":[{"pullRequestId":%d,"lastMergeSourceCommit":{"commitId":"head"}}]}]}`, f.mergedPR)
 	case strings.HasSuffix(r.URL.Path, "/refs"):
-		io.WriteString(w, `{"value":[{"name":"refs/heads/main","objectId":"squash1"}]}`)
+		fmt.Fprintf(w, `{"value":[{"name":"refs/heads/main","objectId":%q}]}`, cmp.Or(f.head, "squash1"))
 	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads" && r.Method == http.MethodGet:
-		io.WriteString(w, `{"value":[]}`)
+		fmt.Fprintf(w, `{"value":%s}`, cmp.Or(f.threads, "[]"))
+	case r.URL.Path == "/org/proj/_apis/build/builds":
+		fmt.Fprintf(w, `{"value":%s}`, cmp.Or(f.builds, "[]"))
 	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads":
 		_ = json.NewDecoder(r.Body).Decode(&f.created)
 		io.WriteString(w, `{"id":1}`)
@@ -1234,7 +1203,7 @@ func TestVersion(t *testing.T) {
 func TestUsage(t *testing.T) {
 	var out bytes.Buffer
 	eq(t, "exit code", 1, run(nil, &out, &out))
-	has(t, "message", out.String(), "tfpr: usage: tfpr plan|derive|render|comment|decide|apply|resolve-plan-run")
+	has(t, "message", out.String(), "tfpr: usage: tfpr plan|derive|render|comment|gate|apply|report|--version")
 }
 
 // comment writes the full plan to the job summary first, through the
