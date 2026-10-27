@@ -5,9 +5,9 @@
 **Exit code:** `2`  
 **Job:** [#1234](https://ci.example/run/1234/job/5678)
 
-| Add | Change | Destroy | Replace | **Import** | Outputs |
-|---|---|---|---|---|---|
-| 40 | 0 | 2 | 0 | **0** | 1 |
+| Add | Change | Destroy | Replace | **Import** | Forget | Move | Outputs |
+|---|---|---|---|---|---|---|---|
+| 40 | 0 | 2 | 0 | **0** | 0 | 0 | 1 |
 
 <details open><summary>🚦 Diff summary</summary>
 

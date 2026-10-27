@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerate test/fixtures/render/*/{plan.json,plan.txt,exit_code} with real
-# terraform against test/fixtures/stack. Run test/run.sh --update afterwards
+# terraform against test/fixtures/stack (and stack-refactor for moved-removed). Run test/run.sh --update afterwards
 # to refresh the expected comment bodies.
 set -euo pipefail
 
@@ -30,5 +30,9 @@ capture no-changes
 capture changes -var 'items={alpha="uno",gamma="three"}' -var 'replace_trigger=v2'
 capture output-only -var 'label=renamed'
 capture truncated -var "items={$(for i in $(seq -w 1 40); do printf 'item%s="value-%s",' "$i" "$i"; done)}"
+# moved {} and removed {} (destroy = false) against the same baseline state.
+cp "${here}/stack-refactor/main.tf" main.tf
+capture moved-removed
+
 # The truncated case renders with a small budget so the golden file stays readable.
 echo 2000 > "${out}/truncated/budget"

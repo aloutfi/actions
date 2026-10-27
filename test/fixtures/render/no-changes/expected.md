@@ -5,9 +5,9 @@
 **Exit code:** `0`  
 **Job:** [#1234](https://ci.example/run/1234/job/5678)
 
-| Add | Change | Destroy | Replace | **Import** | Outputs |
-|---|---|---|---|---|---|
-| 0 | 0 | 0 | 0 | **0** | 0 |
+| Add | Change | Destroy | Replace | **Import** | Forget | Move | Outputs |
+|---|---|---|---|---|---|---|---|
+| 0 | 0 | 0 | 0 | **0** | 0 | 0 | 0 |
 
 <details><summary>⚙️ Full terraform plan output</summary>
 

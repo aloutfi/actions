@@ -72,30 +72,36 @@ artifact_name() {
 }
 
 # Fields printed by plan_stats, in order. They are also tfpr plan's step outputs.
-PLAN_STATS=(creates updates destroys replaces imports output_changes
+PLAN_STATS=(creates updates destroys replaces imports forgets moves output_changes
   has_changes has_imports has_output_changes summary)
 
 # plan_stats PLAN_JSON -> one TSV line of PLAN_STATS.
 # terraform show -json emits resource_changes[] with change.actions =
-# ["no-op"|"create"|"read"|"update"|"delete"] or ["create","delete"] for
-# replace; change.importing = { id: "..." } for imports.
+# ["no-op"|"create"|"read"|"update"|"delete"|"forget"] or ["create","delete"]
+# for replace; change.importing = { id: "..." } for imports; previous_address
+# for moved resources. forget comes from removed { lifecycle { destroy = false } }.
+# Forgets and moves change state, so they count toward has_changes.
 # Callers read it with: local "${PLAN_STATS[@]}"; IFS=$'\t' read -r "${PLAN_STATS[@]}"
 plan_stats() {
   jq -r '
-    [.resource_changes[]? | .change] as $rc
+    [.resource_changes[]?] as $rc
     | {
-        creates:  [$rc[] | select(.actions | index("create")) | select(.actions | index("delete") | not)] | length,
-        updates:  [$rc[] | select(.actions == ["update"])] | length,
-        destroys: [$rc[] | select(.actions | index("delete")) | select(.actions | index("create") | not)] | length,
-        replaces: [$rc[] | select(.actions | (index("create") and index("delete")))] | length,
-        imports:  [$rc[] | select(.importing != null)] | length,
+        creates:  [$rc[] | select(.change.actions | index("create")) | select(.change.actions | index("delete") | not)] | length,
+        updates:  [$rc[] | select(.change.actions == ["update"])] | length,
+        destroys: [$rc[] | select(.change.actions | index("delete")) | select(.change.actions | index("create") | not)] | length,
+        replaces: [$rc[] | select(.change.actions | (index("create") and index("delete")))] | length,
+        imports:  [$rc[] | select(.change.importing != null)] | length,
+        forgets:  [$rc[] | select(.change.actions | index("forget"))] | length,
+        moves:    [$rc[] | select(.previous_address != null and .previous_address != .address)] | length,
         output_changes: [.output_changes[]? | select(.actions != ["no-op"])] | length
       }
-    | .has_changes = (.creates + .updates + .destroys + .replaces > 0)
+    | .has_changes = (.creates + .updates + .destroys + .replaces + .forgets + .moves > 0)
     | .has_imports = (.imports > 0)
     | .has_output_changes = (.output_changes > 0)
     | .summary = "\(.creates) to add, \(.updates) to change, \(.destroys) to destroy, \(.replaces) to replace, \(.imports) to import"
-    | [.creates, .updates, .destroys, .replaces, .imports, .output_changes,
+        + (if .forgets > 0 then ", \(.forgets) to forget" else "" end)
+        + (if .moves > 0 then ", \(.moves) to move" else "" end)
+    | [.creates, .updates, .destroys, .replaces, .imports, .forgets, .moves, .output_changes,
        .has_changes, .has_imports, .has_output_changes, .summary]
     | @tsv
   ' "$1"
@@ -227,9 +233,9 @@ cmd_render() {
   echo "**Exit code:** \`${exit_code}\`  "
   echo "**Job:** [#${run_id}](${job_url})"
   echo ""
-  echo "| Add | Change | Destroy | Replace | **Import** | Outputs |"
-  echo "|---|---|---|---|---|---|"
-  echo "| ${creates} | ${updates} | ${destroys} | ${replaces} | **${imports}** | ${output_changes} |"
+  echo "| Add | Change | Destroy | Replace | **Import** | Forget | Move | Outputs |"
+  echo "|---|---|---|---|---|---|---|---|"
+  echo "| ${creates} | ${updates} | ${destroys} | ${replaces} | **${imports}** | ${forgets} | ${moves} | ${output_changes} |"
   echo ""
   if [[ -n "${diff_summary}" ]]; then
     echo "<details${details_open}><summary>🚦 Diff summary</summary>"
