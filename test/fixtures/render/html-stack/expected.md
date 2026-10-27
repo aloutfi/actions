@@ -1,5 +1,5 @@
 <!-- tf-plan:envs/<prod>&"x" :: default -->
-<!-- tfpr:plan@1 {"key":"envs-prodx:default","sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:6715d3894517c87739a2967441c2644874087a21eab0c4d5f4f63bf792ce1f61","run":"","attempt":0} -->
+<!-- tfpr:plan@1 {"key":"envs-prodx:default","sha":"","head_sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:6715d3894517c87739a2967441c2644874087a21eab0c4d5f4f63bf792ce1f61","run":"","attempt":0} -->
 ### ⚠️ Terraform plan · `envs/<prod>&"x"` (`default`) · 1 to add, 1 to change, 1 to destroy, 1 to replace
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |

@@ -14,6 +14,7 @@ type GateInput struct {
 	SkipNoop  bool        // opt-in: skip applying a plan reviewed as a no-op
 	Attempt   int         // 0 = the CI has no attempt counter
 	PRs       int         // PRs that merged this commit
+	PRHead    string      // that PR's final head commit
 	Records   []string    // plan records tfpr's own identity left on that PR for this stack
 	MergeTree string      // git tree of the commit being applied; "" if unknown
 }
@@ -29,9 +30,10 @@ type GateDecision struct{ Action, Reason string }
 //   - Unverifiable (the head can't be read, or a re-run of a non-branch
 //     ref): refuse.
 //   - Skip on no-op (opt-in): skip only when every condition holds: a first
-//     attempt, exactly one PR, exactly one record for this stack, its status
-//     no_op, and the merged tree equal to the planned tree. Any doubt
-//     applies (fail open to apply, never to skip), and the reason says why.
+//     attempt, exactly one PR, exactly one trusted record for this stack
+//     (TrustedRecord), its status no_op, and the merged tree equal to the
+//     planned tree. Any doubt applies (fail open to apply, never to skip),
+//     and the reason says why.
 func Gate(in GateInput) GateDecision {
 	switch in.Guard.Code {
 	case GuardSuperseded:
@@ -49,17 +51,11 @@ func Gate(in GateInput) GateDecision {
 		return GateDecision{GateApply, "no-pr"}
 	case in.PRs > 1:
 		return GateDecision{GateApply, "ambiguous-pr"}
-	case len(in.Records) == 0:
-		return GateDecision{GateApply, "no-record"}
-	case len(in.Records) > 1:
-		return GateDecision{GateApply, "ambiguous-record"}
 	}
-	rec, err := ParseRecord(in.Records[0])
+	rec, doubt := TrustedRecord(in.Records, in.Key, in.PRHead)
 	switch {
-	case err != nil:
-		return GateDecision{GateApply, "invalid-record"}
-	case rec.Key != in.Key:
-		return GateDecision{GateApply, "record-for-another-stack"}
+	case doubt != "":
+		return GateDecision{GateApply, doubt}
 	case rec.Status != StatusNoOp:
 		return GateDecision{GateApply, "plan-has-changes"}
 	case rec.Tree == "" || in.MergeTree == "":
@@ -85,9 +81,11 @@ type GateResult struct {
 	Ref        string `json:"ref"`
 	BranchHead string `json:"branch_head,omitempty"` // the branch's head, when it was read
 	Attempt    int    `json:"attempt"`
-	PR         string `json:"pr,omitempty"`       // the PR that merged SHA, when exactly one did
-	PlanRun    string `json:"plan_run,omitempty"` // the run that planned it, from the PR's record
-	Artifact   string `json:"artifact"`           // the planfile artifact name
+	PR         string `json:"pr,omitempty"`          // the PR that merged SHA, when exactly one did
+	PlanRun    string `json:"plan_run,omitempty"`    // the run that planned it, from the PR's trusted record
+	PRHead     string `json:"pr_head,omitempty"`     // the PR head that run planned (= the PR's final head)
+	PlannedSHA string `json:"planned_sha,omitempty"` // the commit that run planned (the PR's merge commit)
+	Artifact   string `json:"artifact"`              // the planfile artifact name
 }
 
 // For reports whether g decided about this commit, stack and workspace.
@@ -95,15 +93,31 @@ func (g GateResult) For(sha, stack, workspace string) bool {
 	return g.Schema == DecisionSchema && g.SHA == sha && g.Stack == stack && g.Workspace == workspace
 }
 
-// RecordRun is the plan run a record names, when there is exactly one valid
-// record; "" otherwise.
-func RecordRun(records []string) string {
-	if len(records) != 1 {
-		return ""
+// TrustedRecord is the one record (already limited to tfpr's own identity's
+// comments) that describes the PR as it merged: for this stack, planned for
+// prHead (the PR's final head), and a plan that completed. A record for an
+// older push, say one whose newer push's plan was cancelled or is still
+// running, describes a plan nobody reviewed for this merge. doubt says why
+// there is none: no-record, ambiguous-record, invalid-record,
+// record-for-another-stack, record-not-for-pr-head or plan-incomplete.
+func TrustedRecord(records []string, key, prHead string) (rec RecordData, doubt string) {
+	switch len(records) {
+	case 0:
+		return rec, "no-record"
+	case 1:
+	default:
+		return rec, "ambiguous-record"
 	}
 	rec, err := ParseRecord(records[0])
-	if err != nil {
-		return ""
+	switch {
+	case err != nil:
+		return rec, "invalid-record"
+	case rec.Key != key:
+		return rec, "record-for-another-stack"
+	case rec.HeadSHA == "" || rec.HeadSHA != prHead:
+		return rec, "record-not-for-pr-head"
+	case rec.Status == StatusError || rec.Status == StatusNotRun:
+		return rec, "plan-incomplete"
 	}
-	return rec.Run
+	return rec, ""
 }

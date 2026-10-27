@@ -1,8 +1,8 @@
 <!-- tf-plan:large :: default -->
-<!-- tfpr:plan@1 {"key":"large:default","sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:3242942dab543e188f96b849e530f1ee4e62b6dd5129fcf5c87fe97c6f587fbb","run":"","attempt":0} -->
+<!-- tfpr:plan@1 {"key":"large:default","sha":"","head_sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:3242942dab543e188f96b849e530f1ee4e62b6dd5129fcf5c87fe97c6f587fbb","run":"","attempt":0} -->
 ### ⚠️ Terraform plan · `large` (`default`) · 3,000 to add, 40 to change, 25 to destroy, 5 to replace
-> **Plan text truncated**: showing 42,594 of 600,946 characters.
-> **Resource list shortened**: every delete, replace and forget is listed; 2,555 lower-risk lines are counted, not listed.
+> **Plan text truncated**: showing 42,631 of 600,946 characters.
+> **Resource list shortened**: every delete, replace and forget is listed; 2,556 lower-risk lines are counted, not listed.
 > Full plan: [job summary](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · [job log](https://ci.example/run/1234/job/5678)
 > Redaction: no redaction filter configured
 
@@ -526,11 +526,10 @@
 +   terraform_data.bulk[441]   create
 +   terraform_data.bulk[442]   create
 +   terraform_data.bulk[443]   create
-+   terraform_data.bulk[444]   create
 ```
-+ 2,555 more `create` lines
++ 2,556 more `create` lines
 
-<details><summary>Plan output for large (truncated: 42,594 of 600,946 characters)</summary>
+<details><summary>Plan output for large (truncated: 42,631 of 600,946 characters)</summary>
 
 ```terraform
 
@@ -2085,6 +2084,7 @@ Terraform will perform the following actions:
 
   # terraform_data.bulk[220] will be created
   + resource "terraform_data" "bulk" {
+      + id     = (known after apply)
 ```
 
 </details>

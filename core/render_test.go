@@ -92,7 +92,7 @@ func TestLargePlanComment(t *testing.T) {
 	if risky != 30 {
 		t.Errorf("the fixture has %d deletes and replaces, want 30", risky)
 	}
-	if !strings.Contains(comment, "\n+ 2,555 more `create` lines\n") {
+	if !strings.Contains(comment, "\n+ 2,556 more `create` lines\n") {
 		t.Errorf("the create group does not say how many lines it left out")
 	}
 }

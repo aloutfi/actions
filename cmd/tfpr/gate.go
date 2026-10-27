@@ -37,7 +37,10 @@ func (a *app) gate() error {
 	if err := a.writeDecision(g); err != nil {
 		return err
 	}
-	download := g.Action == core.GateApply && os.Getenv("TFPR_USE_PLANFILE") == "true" && core.IsFirstAttempt(g.Attempt)
+	// Only a trusted record's run (planned for the PR's final head) supplies a
+	// planfile; without one, apply finds no planfile and fails closed.
+	download := g.Action == core.GateApply && os.Getenv("TFPR_USE_PLANFILE") == "true" &&
+		core.IsFirstAttempt(g.Attempt) && g.PlanRun != ""
 	if err := a.outputs(
 		core.Field{Name: "apply", Value: strconv.FormatBool(g.Action == core.GateApply)},
 		core.Field{Name: "action", Value: g.Action},
@@ -85,12 +88,17 @@ func (a *app) runGate(v vcs.VCS) core.GateResult {
 		}
 		in.PRs = len(prs)
 		if len(prs) == 1 {
-			g.PR = strconv.Itoa(prs[0].Number)
+			g.PR, in.PRHead = strconv.Itoa(prs[0].Number), prs[0].HeadSHA
 			recs, err := v.Records(g.PR, core.PlanMarker(a.stack, a.workspace))
 			if err != nil {
 				a.ci.Log(ci.Warning, fmt.Sprintf("Could not read the plan record on PR #%s: %s", g.PR, err))
 			}
-			in.Records, g.PlanRun = recs, core.RecordRun(recs)
+			in.Records = recs
+			if rec, doubt := core.TrustedRecord(recs, in.Key, in.PRHead); doubt == "" {
+				g.PlanRun, g.PRHead, g.PlannedSHA = rec.Run, rec.HeadSHA, rec.SHA
+			} else if os.Getenv("TFPR_USE_PLANFILE") == "true" {
+				a.ci.Log(ci.Warning, fmt.Sprintf("No reviewed planfile for PR #%s's head %s: %s.", g.PR, core.Short(in.PRHead), doubt))
+			}
 		}
 		if in.SkipNoop {
 			in.MergeTree = gitTree(c.SHA)

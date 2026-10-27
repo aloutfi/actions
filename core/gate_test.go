@@ -5,12 +5,15 @@ import (
 	"testing"
 )
 
-// record is a real record line for stack "infra", workspace "default".
-func record(status, tree string) string {
+// record is a real record line for stack "infra", workspace "default",
+// planned for PR head "H".
+func record(status, tree string) string { return recordFor(status, tree, "H") }
+
+func recordFor(status, tree, head string) string {
 	u := Unit{Path: ".", Status: status, Skippable: status == StatusNoOp}
 	return Record(NewPlanResult(PlanResult{
 		Target: Target{Stack: "infra", Workspace: "default"},
-		Source: Source{SHA: "prmerge", Tree: tree},
+		Source: Source{SHA: "prmerge", Tree: tree, HeadSHA: head},
 		Run:    Run{ID: "77", Attempt: 1},
 	}, []Unit{u}))
 }
@@ -18,7 +21,7 @@ func record(status, tree string) string {
 func TestGate(t *testing.T) {
 	ok := GuardResult{Code: GuardOK}
 	noop := record(StatusNoOp, "T")
-	base := GateInput{Guard: ok, Key: "infra:default", SkipNoop: true, Attempt: 1, PRs: 1, Records: []string{noop}, MergeTree: "T"}
+	base := GateInput{Guard: ok, Key: "infra:default", SkipNoop: true, Attempt: 1, PRs: 1, PRHead: "H", Records: []string{noop}, MergeTree: "T"}
 	with := func(f func(*GateInput)) GateInput { in := base; f(&in); return in }
 
 	for _, c := range []struct {
@@ -46,7 +49,9 @@ func TestGate(t *testing.T) {
 		{"record for another stack", with(func(in *GateInput) { in.Key = "other:default" }), GateApply, "record-for-another-stack"},
 		{"plan had changes", with(func(in *GateInput) { in.Records = []string{record(StatusChanges, "T")} }), GateApply, "plan-has-changes"},
 		{"outputs-only plan", with(func(in *GateInput) { in.Records = []string{record(StatusOutputsOnly, "T")} }), GateApply, "plan-has-changes"},
-		{"failed plan", with(func(in *GateInput) { in.Records = []string{record(StatusError, "T")} }), GateApply, "plan-has-changes"},
+		{"failed plan", with(func(in *GateInput) { in.Records = []string{record(StatusError, "T")} }), GateApply, "plan-incomplete"},
+		{"record for an older push", with(func(in *GateInput) { in.PRHead = "H2" }), GateApply, "record-not-for-pr-head"},
+		{"record without a head", with(func(in *GateInput) { in.Records = []string{recordFor(StatusNoOp, "T", "")} }), GateApply, "record-not-for-pr-head"},
 		{"merged tree differs", with(func(in *GateInput) { in.MergeTree = "U" }), GateApply, "tree-differs"},
 		{"merged tree unknown", with(func(in *GateInput) { in.MergeTree = "" }), GateApply, "tree-unknown"},
 		{"planned tree unknown", with(func(in *GateInput) { in.Records = []string{record(StatusNoOp, "")} }), GateApply, "tree-unknown"},
@@ -75,8 +80,35 @@ func TestParseRecord(t *testing.T) {
 	if rec, err := ParseRecord(`<!-- tfpr:plan@1 {"key":"k","status":"no_op","added_later":{"x":1}} -->`); err != nil || rec.Status != "no_op" {
 		t.Errorf("additive field: %+v, %v", rec, err)
 	}
-	if RecordRun([]string{record(StatusNoOp, "T")}) != "77" || RecordRun(nil) != "" || RecordRun([]string{"x"}) != "" {
-		t.Error("RecordRun")
+	if rec.HeadSHA != "H" {
+		t.Errorf("head_sha: %q", rec.HeadSHA)
+	}
+}
+
+// Only a record planned for the PR's final head, by a plan that completed,
+// is trusted: a newer push whose plan was cancelled or is still running
+// leaves the older push's record behind, and it must not be used.
+func TestTrustedRecord(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		records []string
+		key     string
+		head    string
+		doubt   string
+	}{
+		{"planned for the head", []string{record(StatusChanges, "T")}, "infra:default", "H", ""},
+		{"older push", []string{record(StatusChanges, "T")}, "infra:default", "push2", "record-not-for-pr-head"},
+		{"failed plan", []string{record(StatusError, "")}, "infra:default", "H", "plan-incomplete"},
+		{"unit not run", []string{record(StatusNotRun, "")}, "infra:default", "H", "plan-incomplete"},
+		{"none", nil, "infra:default", "H", "no-record"},
+		{"two", []string{record(StatusNoOp, "T"), record(StatusNoOp, "T")}, "infra:default", "H", "ambiguous-record"},
+		{"another stack", []string{record(StatusNoOp, "T")}, "x:default", "H", "record-for-another-stack"},
+		{"garbage", []string{"x"}, "infra:default", "H", "invalid-record"},
+	} {
+		rec, doubt := TrustedRecord(c.records, c.key, c.head)
+		if doubt != c.doubt || (doubt == "" && rec.Run != "77") {
+			t.Errorf("%s: got %q (run %q), want %q", c.name, doubt, rec.Run, c.doubt)
+		}
 	}
 }
 

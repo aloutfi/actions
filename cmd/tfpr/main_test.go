@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/aloutfi/actions/core"
 )
 
 // fakeGitHub is the GitHub REST API as tfpr uses it. Its fields shape the
@@ -175,12 +177,19 @@ func (s *scenario) set(kv ...string) *scenario {
 	return s
 }
 
-// planArtifact fakes a downloaded planfile artifact in ws/artifact.
+// planArtifact fakes a downloaded planfile artifact in ws/artifact, planned
+// at the PR's merge commit ("prmerge") for its head ("headsha"), and the
+// PR's matching plan record by tfpr, which the gate trusts.
 func (s *scenario) planArtifact(stack, workspace string) {
+	s.planArtifactFor(stack, workspace, "prmerge", "headsha")
+	s.gh.comments = "[" + planComment(5, "github-actions[bot]", recordLine(core.StatusChanges, "T")) + "]"
+}
+
+func (s *scenario) planArtifactFor(stack, workspace, sha, head string) {
 	dir := filepath.Join(s.ws, "artifact")
 	must(s.t, os.MkdirAll(dir, 0o755))
 	must(s.t, os.WriteFile(filepath.Join(dir, "tfplan"), []byte("reviewed plan\n"), 0o644))
-	meta, _ := json.Marshal(map[string]string{"stack": stack, "workspace": workspace})
+	meta, _ := json.Marshal(map[string]string{"stack": stack, "workspace": workspace, "sha": sha, "head_sha": head})
 	must(s.t, os.WriteFile(filepath.Join(dir, "plan-metadata.json"), meta, 0o644))
 }
 
@@ -1069,7 +1078,7 @@ func (f *fakeAzureRepos) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/org/_apis/connectionData":
 		io.WriteString(w, `{"authenticatedUser":{"id":"build-id"}}`)
 	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullrequestquery":
-		fmt.Fprintf(w, `{"results":[{"squash1":[{"pullRequestId":%d,"lastMergeSourceCommit":{"commitId":"head"}}]}]}`, f.mergedPR)
+		fmt.Fprintf(w, `{"results":[{"squash1":[{"pullRequestId":%d,"lastMergeSourceCommit":{"commitId":"headsha"}}]}]}`, f.mergedPR)
 	case strings.HasSuffix(r.URL.Path, "/refs"):
 		fmt.Fprintf(w, `{"value":[{"name":"refs/heads/main","objectId":%q}]}`, cmp.Or(f.head, "squash1"))
 	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads" && r.Method == http.MethodGet:

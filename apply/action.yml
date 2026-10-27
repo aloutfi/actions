@@ -35,12 +35,6 @@ inputs:
       attempt, apply a fresh plan instead of failing.
     required: false
     default: "false"
-  plan_artifact_run_id:
-    description: >-
-      Workflow run ID that produced the planfile (blank = the run named in the
-      PR's plan record, else the current run)
-    required: false
-    default: ""
   skip_noop:
     description: >-
       Skip the apply when the PR's reviewed plan was a no-op and the merged tree
@@ -127,7 +121,9 @@ runs:
         name: ${{ steps.gate.outputs.artifact_name }}
         # Not the stack directory: only this download may supply the reviewed plan.
         path: ${{ runner.temp }}/tfpr-plan-artifact
-        run-id: ${{ inputs.plan_artifact_run_id || steps.gate.outputs.plan_run_id || github.run_id }}
+        # The run named in the merged PR's plan record, and only if that record
+        # was planned for the PR's final head (the gate checks).
+        run-id: ${{ steps.gate.outputs.plan_run_id }}
         # Cross-run downloads need github-token; without it the action looks
         # only at the current run and reports "not found".
         github-token: ${{ inputs.token }}
@@ -143,7 +139,6 @@ runs:
         TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
         TFPR_ALLOW_FRESH_PLAN_FALLBACK: ${{ inputs.allow_fresh_plan_fallback }}
         TFPR_PLAN_DIR: ${{ runner.temp }}/tfpr-plan-artifact
-        TFPR_PLAN_RUN_ID: ${{ inputs.plan_artifact_run_id || steps.gate.outputs.plan_run_id }}
         TFPR_SKIP_NOOP: ${{ inputs.skip_noop }}
         TFPR_LOCK_TIMEOUT: ${{ inputs.lock_timeout }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}

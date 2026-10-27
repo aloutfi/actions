@@ -55,8 +55,6 @@
 //	TFPR_ALLOW_FRESH_PLAN_FALLBACK  apply: fresh-plan if the planfile is missing (false)
 //	TFPR_PLAN_DIR                   gate/apply: directory the planfile artifact is
 //	                                downloaded into; gate empties it first
-//	TFPR_PLAN_RUN_ID                apply: run that produced the planfile (default: the
-//	                                run named in the PR's plan record)
 //	TFPR_LOCK_TIMEOUT               apply: -lock-timeout (5m)
 //	TFPR_MODE                       plan/derive/comment: pr (default) or drift. In drift
 //	                                mode comment touches no PR: it writes the full plan to
@@ -448,6 +446,7 @@ func (a *app) plan() (err error) {
 
 	meta := struct {
 		SHA              string `json:"sha"`
+		HeadSHA          string `json:"head_sha"`
 		PRNumber         string `json:"pr_number"`
 		Actor            string `json:"actor"`
 		CreatedAt        string `json:"created_at"`
@@ -456,7 +455,7 @@ func (a *app) plan() (err error) {
 		TerraformVersion string `json:"terraform_version"`
 		HasChanges       bool   `json:"has_changes"`
 		HasImports       bool   `json:"has_imports"`
-	}{a.ctx.SHA, a.ctx.PR, a.ctx.Actor, time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+	}{a.ctx.SHA, a.ctx.HeadSHA, a.ctx.PR, a.ctx.Actor, time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		a.stack, a.workspace, r.Tool.BinaryVersion, stats.HasChanges(), stats.HasImports()}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -572,11 +571,11 @@ func (a *app) postPlanComment(v vcs.VCS, pr string, r core.PlanResult, marker, r
 	return nil
 }
 
-// reviewedPlanfile reports whether TFPR_PLAN_DIR holds a downloaded planfile
-// whose plan-metadata.json is for this stack and workspace. A tfplan already
-// in the stack directory (say, from an earlier plan in the same job) never
-// counts as the reviewed plan.
-func (a *app) reviewedPlanfile() bool {
+// reviewedPlanfile reports whether TFPR_PLAN_DIR holds the planfile the
+// gate's trusted record describes: downloaded (a tfplan already in the stack
+// directory never counts), and with a plan-metadata.json for this stack and
+// workspace that was planned at the record's commit for the PR's final head.
+func (a *app) reviewedPlanfile(g core.GateResult) bool {
 	dir := os.Getenv("TFPR_PLAN_DIR")
 	if dir == "" {
 		return false
@@ -594,6 +593,11 @@ func (a *app) reviewedPlanfile() bool {
 	stack, ok := meta["stack"].(string)
 	if err != nil || !ok || core.CleanStack(stack) != a.stack || meta["workspace"] != a.workspace {
 		a.ci.Log(ci.Warning, fmt.Sprintf("Ignoring the planfile artifact: its plan-metadata.json is missing or is not for stack '%s' workspace '%s'.", a.stack, a.workspace))
+		return false
+	}
+	if g.PRHead == "" || meta["head_sha"] != g.PRHead || meta["sha"] != g.PlannedSHA {
+		a.ci.Log(ci.Warning, fmt.Sprintf("Ignoring the planfile artifact: it was not planned for the merged PR's head %s (its plan-metadata.json says sha %v, head %v).",
+			core.Short(g.PRHead), meta["sha"], meta["head_sha"]))
 		return false
 	}
 	return true
@@ -616,7 +620,7 @@ func (a *app) apply() error {
 			a.ci.Log(ci.Warning, "Could not write decision.json: "+err.Error())
 		}
 	}
-	r := core.ApplyReport{Gate: g, PlanRun: envOr("TFPR_PLAN_RUN_ID", g.PlanRun)}
+	r := core.ApplyReport{Gate: g, PlanRun: g.PlanRun}
 	code, reason := 0, g.Reason
 	switch g.Action {
 	case core.GateRefuse:
@@ -624,7 +628,7 @@ func (a *app) apply() error {
 	case core.GateApply:
 		usePlanfile := os.Getenv("TFPR_USE_PLANFILE") == "true"
 		allow := os.Getenv("TFPR_ALLOW_FRESH_PLAN_FALLBACK") == "true"
-		d := core.DecidePlanSource(usePlanfile, g.Attempt, a.reviewedPlanfile(), allow)
+		d := core.DecidePlanSource(usePlanfile, g.Attempt, a.reviewedPlanfile(g), allow)
 		if t := core.DescribeDecision(d, g.Attempt, g.Artifact, ""); t.Log != "" {
 			a.log(t.Level, t.Log)
 		}

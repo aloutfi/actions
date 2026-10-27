@@ -1,5 +1,5 @@
 <!-- tf-plan:truncated :: default -->
-<!-- tfpr:plan@1 {"key":"truncated:default","sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:458f12ab4b9a187645281d29abf2db46c3396fdbcbf8e05e1af8ec127ada5756","run":"","attempt":0} -->
+<!-- tfpr:plan@1 {"key":"truncated:default","sha":"","head_sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:458f12ab4b9a187645281d29abf2db46c3396fdbcbf8e05e1af8ec127ada5756","run":"","attempt":0} -->
 ### ⚠️ Terraform plan · `truncated` (`default`) · 40 to add, 0 to change, 2 to destroy
 > **Plan text truncated**: showing 2,825 of 8,766 characters.
 > **Resource list shortened**: every delete, replace and forget is listed; 2 lower-risk lines are counted, not listed.

@@ -1,5 +1,6 @@
 {
   "sha": "abc",
+  "head_sha": "",
   "pr_number": "",
   "actor": "me",
   "created_at": "<now>",

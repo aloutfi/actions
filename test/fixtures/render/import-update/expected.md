@@ -1,5 +1,5 @@
 <!-- tf-plan:import-update :: default -->
-<!-- tfpr:plan@1 {"key":"import-update:default","sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:9c00bd6f72827b21a5301749804b0858091c1009dd4c4c697640ec6eab7b2ab5","run":"","attempt":0} -->
+<!-- tfpr:plan@1 {"key":"import-update:default","sha":"","head_sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:9c00bd6f72827b21a5301749804b0858091c1009dd4c4c697640ec6eab7b2ab5","run":"","attempt":0} -->
 ### 📝 Terraform plan · `import-update` (`default`) · 0 to add, 1 to change, 0 to destroy, 1 to import
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |

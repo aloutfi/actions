@@ -35,11 +35,14 @@ func (s *scenario) gitCommit() (sha, tree string) {
 	return git("rev-parse", "HEAD"), git("rev-parse", "HEAD^{tree}")
 }
 
-// recordLine is a plan record for stack/default as the PR's plan wrote it.
-func recordLine(status, tree string) string {
+// recordLine is a plan record for stack/default as the PR's plan wrote it,
+// planned for the fake PR's head ("headsha").
+func recordLine(status, tree string) string { return recordFor(status, tree, "headsha") }
+
+func recordFor(status, tree, head string) string {
 	return core.Record(core.NewPlanResult(core.PlanResult{
 		Target: core.Target{Stack: "stack", Workspace: "default"},
-		Source: core.Source{SHA: "prmerge", Tree: tree},
+		Source: core.Source{SHA: "prmerge", Tree: tree, HeadSHA: head},
 		Run:    core.Run{ID: "77", Attempt: 1},
 	}, []core.Unit{{Path: ".", Status: status, Skippable: status == core.StatusNoOp}}))
 }
@@ -217,4 +220,38 @@ func TestAzureGateAndReport(t *testing.T) {
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// The PR's last plan record is for an older push (a newer push's plan was
+// cancelled or is still running): the gate hands out no plan run, and an
+// apply that wants the reviewed planfile fails closed instead of applying a
+// plan nobody reviewed for this merge.
+func TestGateIgnoresAStalePlan(t *testing.T) {
+	stale := "[" + planComment(5, "github-actions[bot]", recordFor(core.StatusChanges, "T", "push1")) + "]"
+	s := newScenario(t).set("TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact")
+	s.gh.comments = stale // the PR's head is "headsha" (push 2)
+	r := s.run("gate")
+	eq(t, "gate: exit code", 0, r.rc)
+	has(t, "gate: no plan run, no download", r.outputs, "plan_run_id=\ndownload=false\n")
+	has(t, "gate: says why", r.out, "::warning::No reviewed planfile for PR #42's head headsha: record-not-for-pr-head.")
+
+	// Even if push 1's planfile were downloaded, apply refuses it.
+	s.planArtifactFor("stack", "default", "prmerge", "push1")
+	r = s.run("apply")
+	eq(t, "apply: fails closed", 1, r.rc)
+	lacks(t, "apply: no terraform apply", r.tf, "terraform apply")
+	has(t, "apply: missing artifact", r.outputs, "fallback_reason=missing-artifact")
+
+	// A trusted record, but an artifact planned at another commit: refused too.
+	s = newScenario(t).set("TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact")
+	s.planArtifact("stack", "default")
+	s.planArtifactFor("stack", "default", "othermerge", "headsha")
+	r = s.run("apply")
+	eq(t, "other commit: fails closed", 1, r.rc)
+	has(t, "other commit: says why", r.out, "Ignoring the planfile artifact: it was not planned for the merged PR's head")
+
+	// Skip on no-op won't trust it either.
+	s = newScenario(t).set("TFPR_SKIP_NOOP", "true")
+	s.gh.comments = "[" + planComment(5, "github-actions[bot]", recordFor(core.StatusNoOp, "T", "push1")) + "]"
+	has(t, "skip-noop: applies", s.run("gate").outputs, "reason=record-not-for-pr-head")
 }

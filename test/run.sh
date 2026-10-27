@@ -252,29 +252,17 @@ while IFS=$'\037' read -r name stack workspace expected; do
   assert_has "artifact_name: ${name}" "${OUTPUTS}" "artifact_name=${expected}"
 done < <(cases artifact_name.tsv)
 
-# same_stack.tsv: apply takes the reviewed planfile only when its metadata
-# names this stack. A first attempt on a tag needs no branch-head lookup, and
-# the unreachable API makes the apply-result comment skip itself.
-while IFS=$'\037' read -r name metadata_stack tfpr_stack same; do
-  new_ws
-  mkdir -p "${ws}/artifact"
-  echo "reviewed plan" > "${ws}/artifact/tfplan"
-  printf '{"stack":"%s","workspace":"default"}\n' "${metadata_stack}" > "${ws}/artifact/plan-metadata.json"
-  run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact TFPR_STACK="${tfpr_stack}" GITHUB_REF=refs/tags/v1
-  if [[ "${same}" == "true" ]]; then
-    assert_has "same_stack: ${name}: applies the planfile" "${CALLS}" "-lock-timeout=5m tfplan"
-  else
-    assert_eq "same_stack: ${name}: refused" 1 "${RC}"
-    assert_lacks "same_stack: ${name}: no apply" "${CALLS}" "terraform apply"
-  fi
-done < <(cases same_stack.tsv)
+# same_stack.tsv is checked by the Go scenario tests: a planfile apply needs
+# the merged PR's trusted plan record, which only a fake API can provide.
 
 new_ws
 mkdir -p "${ws}/artifact"
 echo "stale" > "${ws}/artifact/tfplan"
 run_tfpr gate TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact GITHUB_REF=refs/tags/v1
 assert_eq "gate empties the artifact dir" "absent" "$([[ -e "${ws}/artifact" ]] && echo present || echo absent)"
-assert_has "gate requests the download" "${OUTPUTS}" "download=true"
+# No reachable API, so no trusted plan record: nothing to download, and an
+# apply that wants the planfile fails closed (missing artifact).
+assert_has "gate without a trusted record: no download" "${OUTPUTS}" "download=false"
 assert_has "gate writes decision.json" "$(cat "${ws}/stack/.tfpr/decision.json")" '"schema": "tfpr/decision@1"'
 
 run_tfpr gate TFPR_USE_PLANFILE=true GITHUB_RUN_ATTEMPT=2 GITHUB_REF=refs/tags/v1
@@ -294,10 +282,10 @@ assert_has "unknown command: usage" "${OUT}" "usage: tfpr plan|derive|render|com
 assert_yaml() {
   if sed 's/^[[:space:]]*//' "${root}/$2" | grep -qxF "$3"; then pass; else fail "$1: '$3' not in $2"; fi
 }
-# A blank plan_artifact_run_id must mean the current run, not an empty run-id.
+# The planfile comes only from the run the gate trusts.
 # shellcheck disable=SC2016
-assert_yaml "apply run-id falls back to current run" apply/action.yml \
-  'run-id: ${{ inputs.plan_artifact_run_id || steps.gate.outputs.plan_run_id || github.run_id }}'
+assert_yaml "apply downloads from the gate's trusted run" apply/action.yml \
+  'run-id: ${{ steps.gate.outputs.plan_run_id }}'
 
 # shellcheck disable=SC2016
 assert_yaml "plan artifact retention is an input" plan/action.yml \

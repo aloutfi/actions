@@ -1,5 +1,5 @@
 <!-- tf-plan:stack :: default -->
-<!-- tfpr:plan@1 {"key":"stack:default","sha":"abc","tree":"","exit":0,"status":"no_op","units":1,"apply":[],"provisional":[],"planset":"","fp":"sha256:8184102f7b0d377e6969414a59da60f234ce28eb5ce330487e29647de22d7718","run":"1","attempt":1} -->
+<!-- tfpr:plan@1 {"key":"stack:default","sha":"abc","head_sha":"prhead","tree":"","exit":0,"status":"no_op","units":1,"apply":[],"provisional":[],"planset":"","fp":"sha256:8184102f7b0d377e6969414a59da60f234ce28eb5ce330487e29647de22d7718","run":"1","attempt":1} -->
 ### ✅ Terraform plan · `stack` (`default`) · No changes
 
 <details><summary>Plan output for stack</summary>

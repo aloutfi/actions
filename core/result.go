@@ -480,7 +480,8 @@ const recordLimit = 8000
 // RecordData is the comment record's content.
 type RecordData struct {
 	Key         string   `json:"key"`
-	SHA         string   `json:"sha"`
+	SHA         string   `json:"sha"`      // the commit planned (on PR builds, the merge commit)
+	HeadSHA     string   `json:"head_sha"` // the PR head it was planned for
 	Tree        string   `json:"tree"`
 	Exit        int      `json:"exit"`
 	Status      string   `json:"status"`
@@ -534,7 +535,7 @@ func Record(r PlanResult) string {
 	if r.Planset != nil {
 		planset = "sha256:" + r.Planset.SHA256
 	}
-	rec := RecordData{r.Target.Key, r.Source.SHA, r.Source.Tree, r.Summary.ExitCode, r.Summary.Status, len(r.Units),
+	rec := RecordData{r.Target.Key, r.Source.SHA, r.Source.HeadSHA, r.Source.Tree, r.Summary.ExitCode, r.Summary.Status, len(r.Units),
 		apply, provisional, planset, RunFingerprint(r), r.Run.ID, r.Run.Attempt}
 	line := recordLine(rec)
 	if len(line) > recordLimit {

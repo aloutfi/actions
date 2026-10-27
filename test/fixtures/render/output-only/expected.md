@@ -1,5 +1,5 @@
 <!-- tf-plan:output-only :: default -->
-<!-- tfpr:plan@1 {"key":"output-only:default","sha":"","tree":"","exit":2,"status":"outputs_only","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:f91a7080f302551ad6906f1ab7d77adc32b06acb8e83ae322f2d40375678479f","run":"","attempt":0} -->
+<!-- tfpr:plan@1 {"key":"output-only:default","sha":"","head_sha":"","tree":"","exit":2,"status":"outputs_only","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:f91a7080f302551ad6906f1ab7d77adc32b06acb8e83ae322f2d40375678479f","run":"","attempt":0} -->
 ### 🔸 Terraform plan · `output-only` (`default`) · No resource changes; 1 output changes. Downstream `terraform_remote_state` readers are affected
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |

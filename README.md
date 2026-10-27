@@ -300,7 +300,6 @@ request it writes only the job summary.
 | `stack`, `workspace`, `terraform_version` | | Same as plan |
 | `use_planfile` | `false` | Download and apply the plan action's planfile |
 | `allow_fresh_plan_fallback` | `false` | If the planfile is missing on the first attempt, apply a fresh plan instead of failing |
-| `plan_artifact_run_id` | from the PR's record | Run that uploaded the planfile; by default the run named in tfpr's comment record on the merged PR, else the current run |
 | `skip_noop` | `false` | Skip the apply when the PR's reviewed plan was a no-op (see gate) |
 | `lock_timeout` | `5m` | `terraform apply -lock-timeout` |
 | `comment_author`, `token` | | Same as plan |
@@ -317,9 +316,15 @@ How apply chooses what to run:
 | First attempt, planfile missing or for another stack/workspace | **Fail**, or a fresh plan with `allow_fresh_plan_fallback: true` |
 | Re-run (attempt > 1) | Fresh plan |
 
-The planfile is downloaded outside the checkout, and its `plan-metadata.json`
-must name the same `stack` and `workspace` as the apply. A `tfplan` already
-in the stack directory is never treated as the reviewed plan.
+The planfile comes from the run named in tfpr's own plan record on the merged
+PR, and only if that record was planned for the PR's final head and the plan
+completed. If a later push's plan was cancelled or is still running, the
+record is for an older push, so there is no reviewed planfile: the apply
+fails closed (or fresh-plans with `allow_fresh_plan_fallback`). The planfile
+is downloaded outside the checkout, and its `plan-metadata.json` must name
+the same `stack` and `workspace` as the apply, and the commit and PR head
+the record names. A `tfplan` already in the stack directory is never treated
+as the reviewed plan.
 
 Before anything else, apply checks that the run's commit is still the head of
 its branch. Applying an older commit's tree would roll back everything merged
