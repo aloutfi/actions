@@ -12,6 +12,12 @@ detects Azure Pipelines from `TF_BUILD=True`. The repo host follows
   (`https://<host>/api/v3`, taken from `Build.Repository.Uri`) or
   `TFPR_GITHUB_API_URL`. It never falls back to api.github.com, which would
   send your enterprise token there: if neither is known, it fails.
+- On a GitHub repo, tfpr edits only comments by its own login. Outside GitHub
+  Actions it asks GitHub whose token it holds (`GET /user`), which works for
+  personal access tokens. GitHub App installation tokens can't answer that,
+  so set `TFPR_COMMENT_AUTHOR` to the app's bot login (`<app-slug>[bot]`).
+  If the author is unknown, `comment` fails and posts nothing. Posting
+  anyway would add a new comment on every run.
 
 This page covers the PR flow: plan, then comment. Apply on the main branch
 (`gate` and `report`) and scheduled drift detection come next.

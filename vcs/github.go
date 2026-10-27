@@ -1,6 +1,7 @@
 package vcs
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -37,13 +38,31 @@ type GitHub struct {
 	author string
 }
 
-// NewGitHub returns the adapter for repo (owner/repo). Only comments by author
-// (default github-actions[bot]) are ever edited.
+// NewGitHub returns the adapter for repo (owner/repo). Only comments by
+// author are ever edited. With no author (outside GitHub Actions, where the
+// default token's login is github-actions[bot]), the adapter asks GitHub
+// whose token it holds (GET /user) before it posts anything.
 func NewGitHub(api *Client, repo, author string) *GitHub {
-	if author == "" {
-		author = DefaultGitHubAuthor
-	}
 	return &GitHub{api: api, repo: repo, author: author}
+}
+
+// ErrNoAuthor means tfpr can't tell which comments are its own, so it posts
+// none: posting anyway would duplicate the comment on every run.
+var ErrNoAuthor = errors.New("the comment author is unknown")
+
+// login is the author whose comments the adapter may edit.
+func (g *GitHub) login() (string, error) {
+	if g.author != "" {
+		return g.author, nil
+	}
+	var user struct {
+		Login string `json:"login"`
+	}
+	if _, err := g.api.Do(http.MethodGet, "/user", nil, &user); err != nil || user.Login == "" {
+		return "", fmt.Errorf("%w: GET /user failed (%v), as it does for GitHub App installation tokens. Set TFPR_COMMENT_AUTHOR to the login that posts, e.g. <app-slug>[bot]", ErrNoAuthor, err)
+	}
+	g.author = user.Login
+	return g.author, nil
 }
 
 type issueComment struct {
@@ -70,13 +89,17 @@ func Compose(marker, record string, body redact.Text) string {
 // status, so Resolved and Fingerprint don't apply.
 func (g *GitHub) UpsertComment(c Comment) (string, error) {
 	pr, marker := c.PR, c.Marker
+	author, err := g.login()
+	if err != nil {
+		return "", err
+	}
 	var id int64
 	// If the listing fails, tfpr cannot know whether its comment exists, and
 	// posting could duplicate it, so it gives up instead.
-	err := GetPages(g.api, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100", g.repo, url.PathEscape(pr)),
+	err = GetPages(g.api, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100", g.repo, url.PathEscape(pr)),
 		func(page []issueComment) bool {
 			for _, ic := range page {
-				if ic.User.Login == g.author && strings.HasPrefix(ic.Body, marker) {
+				if ic.User.Login == author && strings.HasPrefix(ic.Body, marker) {
 					id = ic.ID
 					return false
 				}

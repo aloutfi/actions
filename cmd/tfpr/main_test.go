@@ -28,6 +28,7 @@ type fakeGitHub struct {
 	planRun    string
 	failWrites bool
 	failList   bool   // listing comments fails
+	user       string // GET /user login; "" answers 403 like an app token
 	comments   string // JSON for the PR's existing comments
 
 	mu    sync.Mutex
@@ -54,6 +55,12 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.body = req.Body
 		io.WriteString(w, `{"id":1}`)
+	case p == "/user":
+		if f.user == "" {
+			http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
+			return
+		}
+		io.WriteString(w, `{"login":"`+f.user+`"}`)
 	case strings.HasSuffix(p, "/jobs"):
 		io.WriteString(w, `{"jobs":[{"id":7,"runner_name":"other"},{"id":8,"runner_name":null}]}`)
 	case strings.HasSuffix(p, "/comments"):
@@ -1024,9 +1031,15 @@ func TestAzurePipelinesWithGitHubRepo(t *testing.T) {
 	s.azure("GitHub").set("SYSTEM_COLLECTIONURI", "https://dev.azure.example/org/",
 		"TFPR_GITHUB_TOKEN", "gh-token", "TFPR_GITHUB_API_URL", s.env["GITHUB_API_URL"])
 	s.byo("changes")
+	s.gh.user = "ci-bot" // not github-actions[bot]: the token's own login
+	s.gh.comments = `[{"id":6,"user":{"login":"ci-bot"},"body":"<!-- tf-plan:stack :: default -->\nold"}]`
 	r := s.run("comment")
 	eq(t, "exit code", 0, r.rc)
-	has(t, "comments on the GitHub PR number", r.api, "POST /repos/o/r/issues/42/comments")
+	has(t, "asks whose token it holds", r.api, "GET /user")
+	has(t, "updates its own comment, no duplicate", r.api, "PATCH /repos/o/r/issues/comments/6")
+	lacks(t, "no duplicate", r.api, "POST")
+	r = s.run("comment")
+	has(t, "second run updates again", r.api, "PATCH /repos/o/r/issues/comments/6")
 	eq(t, "with the GitHub token", "Bearer gh-token", s.gh.auth)
 	has(t, "links the Azure run", r.body, "https://dev.azure.example/org/proj/_build/results?buildId=812")
 	has(t, "records the PR head", r.body, `"sha":"abc"`)
@@ -1045,6 +1058,7 @@ func TestGitHubEnterpriseNeedsItsAPI(t *testing.T) {
 	eq(t, "no requests", "", r.api)
 
 	s.set("TFPR_GITHUB_API_URL", s.env["GITHUB_API_URL"])
+	s.gh.user = "ci-bot"
 	r = s.run("comment")
 	eq(t, "with the URL: exit code", 0, r.rc)
 	has(t, "with the URL: comments", r.api, "POST /repos/o/r/issues/42/comments")
@@ -1123,6 +1137,23 @@ func TestOneGitHubClient(t *testing.T) {
 	eq(t, "exit code", 0, r.rc)
 	has(t, "job link lookup", r.api, "GET /repos/o/r/actions/runs/1/jobs")
 	has(t, "comment", r.api, "POST /repos/o/r/issues/42/comments")
+}
+
+// Without a known author tfpr would post a new comment every run: it fails
+// instead and asks for TFPR_COMMENT_AUTHOR.
+func TestUnknownCommentAuthorFails(t *testing.T) {
+	s := newScenario(t)
+	s.azure("GitHub").set("TFPR_GITHUB_API_URL", s.env["GITHUB_API_URL"])
+	s.byo("no-changes")
+	r := s.run("comment")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "asks for the author", r.out, "Set TFPR_COMMENT_AUTHOR")
+	lacks(t, "posts nothing", r.api, "POST")
+
+	s.set("TFPR_COMMENT_AUTHOR", "my-app[bot]")
+	r = s.run("comment")
+	eq(t, "with the author: exit code", 0, r.rc)
+	eq(t, "with the author: no second lookup", 1, strings.Count(r.api, "GET /user"))
 }
 
 func TestUsage(t *testing.T) {

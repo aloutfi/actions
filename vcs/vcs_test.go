@@ -139,7 +139,7 @@ func TestUpsertComment(t *testing.T) {
 		}
 	})
 	base = api.BaseURL
-	msg, err := NewGitHub(api, "o/r", "").UpsertComment(Comment{PR: "42", Marker: "<!-- m -->", Body: text(t, "new")})
+	msg, err := NewGitHub(api, "o/r", DefaultGitHubAuthor).UpsertComment(Comment{PR: "42", Marker: "<!-- m -->", Body: text(t, "new")})
 	if err != nil || msg != "Updated comment 6 on PR #42" {
 		t.Fatalf("got %q, %v", msg, err)
 	}
@@ -161,7 +161,7 @@ func TestUpsertComment(t *testing.T) {
 
 	// A listing failure is returned, and nothing is posted.
 	s, api = newServer(t, ok(`[]`), 404)
-	if _, err := NewGitHub(api, "o/r", "").UpsertComment(Comment{PR: "42", Marker: "m", Body: text(t, "b")}); err == nil {
+	if _, err := NewGitHub(api, "o/r", DefaultGitHubAuthor).UpsertComment(Comment{PR: "42", Marker: "m", Body: text(t, "b")}); err == nil {
 		t.Error("want an error when the listing fails")
 	}
 	for _, c := range s.calls {
@@ -172,7 +172,7 @@ func TestUpsertComment(t *testing.T) {
 
 	// A write failure is returned.
 	_, api = newServer(t, ok(`[]`), 200, 403)
-	if _, err := NewGitHub(api, "o/r", "").UpsertComment(Comment{PR: "42", Marker: "m", Body: text(t, "b")}); err == nil {
+	if _, err := NewGitHub(api, "o/r", DefaultGitHubAuthor).UpsertComment(Comment{PR: "42", Marker: "m", Body: text(t, "b")}); err == nil {
 		t.Error("want an error when the post fails")
 	}
 }
@@ -185,7 +185,7 @@ func TestPRsForCommitAndBranchHead(t *testing.T) {
 		}
 		io.WriteString(w, `{"object":{"sha":"tip"}}`)
 	})
-	g := NewGitHub(api, "o/r", "")
+	g := NewGitHub(api, "o/r", DefaultGitHubAuthor)
 	prs, err := g.PRsForCommit("abc")
 	if err != nil || len(prs) != 2 || prs[1] != (PR{2, "h2"}) {
 		t.Errorf("PRsForCommit: %+v, %v", prs, err)
@@ -241,5 +241,35 @@ func TestCompose(t *testing.T) {
 	}
 	if got := Compose("<!-- m -->", "", text(t, "body\n")); got != "<!-- m -->\nbody\n" {
 		t.Errorf("no record: got %q", got)
+	}
+}
+
+// Outside GitHub Actions the author is whoever the token belongs to.
+func TestGitHubDiscoversItsAuthor(t *testing.T) {
+	s, api := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/user":
+			io.WriteString(w, `{"login":"ci-bot"}`)
+		case r.Method == http.MethodGet:
+			io.WriteString(w, `[{"id":5,"user":{"login":"github-actions[bot]"},"body":"<!-- m -->"},{"id":6,"user":{"login":"ci-bot"},"body":"<!-- m -->"}]`)
+		default:
+			io.WriteString(w, `{}`)
+		}
+	})
+	msg, err := NewGitHub(api, "o/r", "").UpsertComment(Comment{PR: "42", Marker: "<!-- m -->", Body: text(t, "b")})
+	if err != nil || msg != "Updated comment 6 on PR #42" {
+		t.Errorf("got %q, %v (calls %v)", msg, err, s.calls)
+	}
+}
+
+// If GitHub won't say (an app installation token), nothing is posted.
+func TestGitHubUnknownAuthorPostsNothing(t *testing.T) {
+	s, api := newServer(t, ok(`{}`), http.StatusForbidden)
+	_, err := NewGitHub(api, "o/r", "").UpsertComment(Comment{PR: "42", Marker: "m", Body: text(t, "b")})
+	if !errors.Is(err, ErrNoAuthor) || !strings.Contains(err.Error(), "TFPR_COMMENT_AUTHOR") {
+		t.Errorf("got %v", err)
+	}
+	if len(s.calls) != 1 {
+		t.Errorf("calls %v", s.calls)
 	}
 }

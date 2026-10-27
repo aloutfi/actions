@@ -217,6 +217,11 @@ func (a *app) loadVCS() (vcs.VCS, error) {
 		Author: os.Getenv("TFPR_COMMENT_AUTHOR"),
 		Ack:    os.Getenv("TFPR_ACK") == "true",
 	}
+	// GitHub Actions' token posts as github-actions[bot]. Anywhere else the
+	// GitHub adapter asks GitHub whose token it holds.
+	if cfg.Author == "" && a.ctx.CI == "github" {
+		cfg.Author = vcs.DefaultGitHubAuthor
+	}
 	if cfg.Name == "azure" {
 		cfg.URL, cfg.Token = a.ctx.VCSURL, os.Getenv("TFPR_ADO_TOKEN")
 	} else {
@@ -515,6 +520,8 @@ func (a *app) postPlanComment(v vcs.VCS, pr string, r core.PlanResult, marker, r
 		Resolved: r.Summary.Status == core.StatusNoOp, Fingerprint: core.RunFingerprint(r),
 	})
 	switch {
+	case errors.Is(err, vcs.ErrNoAuthor):
+		return err // a setup error, not a flaky API: fix it, don't skip it
 	case err != nil && r.Summary.Status == core.StatusError:
 		fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
 		a.ci.Log(ci.Warning, "Could not post the plan-failed comment on PR #"+pr+".")
@@ -625,7 +632,7 @@ func (a *app) apply() error {
 	// A filter failure fails the step, but code stays terraform's: it is what
 	// the outputs and the comment report.
 	stepFailed := false
-	if err := a.postApplyComment(v, d, code, used, usePlanfile, attempt); errors.Is(err, redact.ErrFailed) {
+	if err := a.postApplyComment(v, d, code, used, usePlanfile, attempt); errors.Is(err, redact.ErrFailed) || errors.Is(err, vcs.ErrNoAuthor) {
 		a.ci.Log(ci.Error, err.Error()+"; nothing was posted")
 		stepFailed = true
 	} else if err != nil {
