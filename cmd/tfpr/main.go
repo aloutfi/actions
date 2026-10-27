@@ -688,7 +688,7 @@ func (a *app) terraformApply(source string) int {
 func (a *app) postApplyComment(v vcs.VCS, d core.Decision, code int, used, usePlanfile bool, attempt int) error {
 	sha := a.ctx.SHA
 	// Not every apply comes from a PR merge (drift, manual dispatch); skip quietly.
-	prs, err := v.PRsForCommit(sha)
+	prs, err := v.PRsForCommit(sha, a.ctx.Ref)
 	if err != nil || len(prs) == 0 {
 		fmt.Fprintf(a.stdout, "No PR associated with %s; skipping apply-result comment.\n", sha)
 		return nil
@@ -743,7 +743,7 @@ func (a *app) resolvePlanRun() error {
 		// nothing so apply takes the fresh-plan path.
 		a.ci.Log(ci.Notice, fmt.Sprintf("Re-run detected (attempt=%d); fresh-plan fallback", attempt))
 	} else {
-		prs, err := v.PRsForCommit(sha)
+		prs, err := v.PRsForCommit(sha, a.ctx.Ref)
 		if err != nil {
 			return err
 		}

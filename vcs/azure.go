@@ -203,19 +203,27 @@ func (z *Azure) status(c Comment, existing *adoThread) (status string, reopened 
 func str(s string) typedValue { return typedValue{Type: "System.String", Value: s} }
 
 type adoPR struct {
-	ID                    int `json:"pullRequestId"`
+	ID                    int    `json:"pullRequestId"`
+	Status                string `json:"status"`
+	TargetRefName         string `json:"targetRefName"`
 	LastMergeSourceCommit struct {
 		CommitID string `json:"commitId"`
 	} `json:"lastMergeSourceCommit"`
+	LastMergeCommit struct {
+		CommitID string `json:"commitId"`
+	} `json:"lastMergeCommit"`
 }
 
 // mergedPR matches the title Azure Repos gives a PR's merge commit, which is
 // all a squash merge leaves to go on.
 var mergedPR = regexp.MustCompile(`^Merged PR (\d+):`)
 
-// PRsForCommit finds the PR that sha merged: by its last merge commit
-// (pullrequestquery), or else by the "Merged PR <id>:" title of a squash merge.
-func (z *Azure) PRsForCommit(sha string) ([]PR, error) {
+// PRsForCommit finds the PR that sha merged into ref: by its last merge
+// commit (pullrequestquery), or else by the "Merged PR <id>:" title of a
+// squash merge. Anyone can write such a title, so that PR counts only if it
+// is completed, targeted ref, and its last merge commit is sha. Otherwise
+// there is no PR: never the wrong one.
+func (z *Azure) PRsForCommit(sha, ref string) ([]PR, error) {
 	var q struct {
 		Results []map[string][]adoPR `json:"results"`
 	}
@@ -247,6 +255,9 @@ func (z *Azure) PRsForCommit(sha string) ([]PR, error) {
 	var pr adoPR
 	if _, err := z.api.Do(http.MethodGet, z.path("/pullrequests/%d", id), nil, &pr); err != nil {
 		return nil, err
+	}
+	if pr.Status != "completed" || ref == "" || pr.TargetRefName != ref || pr.LastMergeCommit.CommitID != sha {
+		return nil, nil
 	}
 	return []PR{{Number: pr.ID, HeadSHA: pr.LastMergeSourceCommit.CommitID}}, nil
 }

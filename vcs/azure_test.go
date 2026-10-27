@@ -319,18 +319,36 @@ func TestAzureCreateIsNotRetried(t *testing.T) {
 }
 
 func TestAzurePRsForCommit(t *testing.T) {
+	pr := func(id int, status, target, mergeCommit string) map[string]any {
+		return map[string]any{"pullRequestId": id, "status": status, "targetRefName": target,
+			"lastMergeSourceCommit": map[string]any{"commitId": fmt.Sprintf("head%d", id)},
+			"lastMergeCommit":       map[string]any{"commitId": mergeCommit}}
+	}
 	f := &fakeADO{
 		query: map[string][]map[string]any{
 			"merge1": {{"pullRequestId": 7, "lastMergeSourceCommit": map[string]any{"commitId": "head7"}}},
 		},
-		commits: map[string]string{"squash1": "Merged PR 9: tidy the network\n\nRelated work items: #1", "plain": "fix typo"},
-		prs:     map[string]map[string]any{"9": {"pullRequestId": 9, "lastMergeSourceCommit": map[string]any{"commitId": "head9"}}},
+		commits: map[string]string{
+			"squash1":   "Merged PR 9: tidy the network\n\nRelated work items: #1",
+			"plain":     "fix typo",
+			"forged":    "Merged PR 9: a title anyone can type", // PR 9 merged squash1, not this
+			"elsewhere": "Merged PR 10: merged into another branch",
+			"open":      "Merged PR 11: still open",
+		},
+		prs: map[string]map[string]any{
+			"9":  pr(9, "completed", "refs/heads/main", "squash1"),
+			"10": pr(10, "completed", "refs/heads/release", "elsewhere"),
+			"11": pr(11, "active", "refs/heads/main", "open"),
+		},
 	}
 	z := newADO(t, f, false)
-	for sha, want := range map[string]string{"merge1": "[{7 head7}]", "squash1": "[{9 head9}]", "plain": "[]"} {
-		prs, err := z.PRsForCommit(sha)
-		if err != nil || fmt.Sprint(prs) != want && !(want == "[]" && len(prs) == 0) {
-			t.Errorf("%s: %v, %v", sha, prs, err)
+	for sha, want := range map[string]string{
+		"merge1": "[{7 head7}]", "squash1": "[{9 head9}]",
+		"plain": "[]", "forged": "[]", "elsewhere": "[]", "open": "[]",
+	} {
+		prs, err := z.PRsForCommit(sha, "refs/heads/main")
+		if got := fmt.Sprint(prs); err != nil || got != want {
+			t.Errorf("%s: got %s, %v; want %s", sha, got, err, want)
 		}
 	}
 }

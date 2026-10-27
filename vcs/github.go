@@ -122,8 +122,9 @@ func (g *GitHub) UpsertComment(c Comment) (string, error) {
 	return "Posted comment on PR #" + pr, nil
 }
 
-// PRsForCommit lists the PRs associated with sha (first page only).
-func (g *GitHub) PRsForCommit(sha string) ([]PR, error) {
+// PRsForCommit lists the PRs associated with sha (first page only). GitHub
+// answers this directly, so the ref is not needed.
+func (g *GitHub) PRsForCommit(sha, _ string) ([]PR, error) {
 	var pulls []struct {
 		Number int `json:"number"`
 		Head   struct {

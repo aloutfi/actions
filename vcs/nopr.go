@@ -13,7 +13,7 @@ func (NoPR) UpsertComment(c Comment) (string, error) {
 }
 
 // PRsForCommit finds no PRs.
-func (NoPR) PRsForCommit(string) ([]PR, error) { return nil, nil }
+func (NoPR) PRsForCommit(string, string) ([]PR, error) { return nil, nil }
 
 // BranchHead cannot know the head.
 func (NoPR) BranchHead(string) (string, error) {

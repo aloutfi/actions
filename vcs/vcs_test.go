@@ -186,7 +186,7 @@ func TestPRsForCommitAndBranchHead(t *testing.T) {
 		io.WriteString(w, `{"object":{"sha":"tip"}}`)
 	})
 	g := NewGitHub(api, "o/r", DefaultGitHubAuthor)
-	prs, err := g.PRsForCommit("abc")
+	prs, err := g.PRsForCommit("abc", "refs/heads/main")
 	if err != nil || len(prs) != 2 || prs[1] != (PR{2, "h2"}) {
 		t.Errorf("PRsForCommit: %+v, %v", prs, err)
 	}
@@ -226,7 +226,7 @@ func TestNew(t *testing.T) {
 
 func TestNoPR(t *testing.T) {
 	var v VCS = NoPR{}
-	if prs, err := v.PRsForCommit("abc"); err != nil || len(prs) != 0 {
+	if prs, err := v.PRsForCommit("abc", "refs/heads/main"); err != nil || len(prs) != 0 {
 		t.Errorf("PRsForCommit: %v, %v", prs, err)
 	}
 	if _, err := v.BranchHead("main"); err == nil {
