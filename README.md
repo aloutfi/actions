@@ -1,7 +1,7 @@
 # actions
 
-Terraform plan → PR comment → apply, as a portable bash + jq core
-(`bin/tfpr`) with thin GitHub Actions wrappers.
+Terraform plan → PR comment → apply, as one static Go binary (`tfpr`,
+standard library only) with thin GitHub Actions wrappers.
 
 - `plan`: init, validate, and plan. Posts or updates one summary comment per
   stack and workspace on the PR. Can upload the binary planfile as an artifact.
@@ -136,15 +136,37 @@ with `-auto-approve` would roll back everything merged since, so:
 Outputs: `run_id` and `pr_number`. Both are empty on a re-run, on a direct push,
 when several PRs match, or when no successful plan run exists.
 
+### How the actions get `tfpr`
+
+Each action's first step runs `scripts/install-tfpr.sh`, which takes the first
+of these that applies:
+
+1. `TFPR_BIN` in the job's `env:`: a path to a prebuilt `tfpr` binary.
+2. A release. Release tags carry a `checksums.txt` next to the actions. The
+   script downloads `tfpr_<version>_<os>_<arch>.tar.gz` from this repo's
+   GitHub release and checks it against that file's sha256. Pinning
+   `aloutfi/actions/plan@<tag or sha>` therefore pins the binary's bytes.
+3. Otherwise (a branch, or any unreleased commit) it builds `tfpr` from the
+   action's own source with `actions/setup-go`. That puts Go on the job's
+   `PATH`.
+
 ## Development
 
 ```sh
-test/run.sh                  # render golden files + unit tests
+go test ./...                # unit tests, render goldens, command scenarios
+test/run.sh                  # black-box CLI suite (builds tfpr; or set TFPR_BIN)
 test/run.sh --update         # rewrite golden files
 test/fixtures/generate.sh    # regenerate plan fixtures with real terraform
-shellcheck bin/tfpr lib/*/*.sh test/run.sh test/fixtures/generate.sh
+gofmt -l . && go vet ./...
+shellcheck scripts/install-tfpr.sh test/run.sh test/fixtures/generate.sh
 actionlint
 ```
 
-The adapter contract for new CI platforms and repo hosts is in
-[lib/README.md](lib/README.md).
+Layout: `core/` is pure (plan stats, naming, apply policies, comment
+templates), `ci/` holds the CI platform adapters and their detection table,
+`vcs/` holds the repo-host adapters, and `cmd/tfpr` wires them together. The
+ports are the `CI` interface in [ci/ci.go](ci/ci.go) and the `VCS` interface
+in [vcs/vcs.go](vcs/vcs.go). `test/cases/*.tsv` and the golden files under
+`test/fixtures/` are the shared behavior spec.
+
+The terraform executable is `TFPR_TF_BIN` (default `terraform`).
