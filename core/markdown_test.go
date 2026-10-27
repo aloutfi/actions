@@ -94,3 +94,15 @@ func TestHostFor(t *testing.T) {
 		t.Errorf("unknown hosts get the default row")
 	}
 }
+
+// Blank lines before an over-long line must not leave an empty cut: the
+// text falls back to a character cut instead of disappearing.
+func TestCutAfterBlankLines(t *testing.T) {
+	text := "\n\n" + strings.Repeat("x", 50) + "\nnext"
+	for _, m := range []measure{inRunes, inBytes} {
+		got := m.cut(text, 10)
+		if strings.TrimSpace(got) == "" || m.of(got) > 10 || !strings.HasPrefix(text, got) {
+			t.Errorf("%v: cut = %q", m, got)
+		}
+	}
+}

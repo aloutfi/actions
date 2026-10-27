@@ -152,8 +152,8 @@ func (m measure) String() string {
 	return "characters"
 }
 
-// cut shortens text to at most limit, at a line boundary when it can and
-// never inside a UTF-8 sequence.
+// cut shortens text to at most limit, at a line boundary when that keeps
+// some non-blank text, else at a character; never inside a UTF-8 sequence.
 func (m measure) cut(text string, limit int) string {
 	if m.of(text) <= limit {
 		return text
@@ -167,17 +167,20 @@ func (m measure) cut(text string, limit int) string {
 		used += n
 		end += len(line)
 	}
-	if end == 0 { // the first line alone is too long
-		for i, r := range text {
-			n := 1
-			if m == inBytes {
-				n = utf8.RuneLen(r)
-			}
-			if used+n > limit {
-				return text[:i]
-			}
-			used += n
-		}
+	if kept := strings.TrimRight(text[:end], "\n"); strings.TrimSpace(kept) != "" {
+		return kept
 	}
-	return strings.TrimRight(text[:end], "\n")
+	// Only blank lines fit before an over-long line: cut by character.
+	used = 0
+	for i, r := range text {
+		n := 1
+		if m == inBytes {
+			n = utf8.RuneLen(r)
+		}
+		if used+n > limit {
+			return text[:i]
+		}
+		used += n
+	}
+	return text
 }
