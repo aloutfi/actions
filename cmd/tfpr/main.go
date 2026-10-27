@@ -487,7 +487,7 @@ func (a *app) postApplyComment(v vcs.VCS, d core.Decision, code int, used, usePl
 	}
 	pr := strconv.Itoa(prs[0].Number)
 	artifact := ""
-	if usePlanfile && attempt <= 1 {
+	if usePlanfile && core.IsFirstAttempt(attempt) {
 		artifact = core.ArtifactName(a.stack, a.workspace)
 	}
 	body, err := core.RenderApply(core.ApplyComment{
@@ -525,7 +525,7 @@ func (a *app) resolvePlanRun() error {
 	attempt, sha := a.ctx.Attempt, a.ctx.SHA
 	var prNum, runID string
 
-	if attempt > 1 {
+	if !core.IsFirstAttempt(attempt) {
 		// Re-run: the stored plan reflects state before the failed apply. Emit
 		// nothing so apply takes the fresh-plan path.
 		a.ci.Log(ci.Notice, fmt.Sprintf("Re-run detected (attempt=%d); fresh-plan fallback", attempt))

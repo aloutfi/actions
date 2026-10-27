@@ -5,3 +5,5 @@ first attempt, missing artifact, fails closed	true	1	false	false	none missing-ar
 first attempt, missing artifact, fallback allowed	true	1	false	true	fresh missing-artifact
 re-run ignores stored planfile	true	2	true	false	fresh rerun
 re-run with fallback allowed	true	3	false	true	fresh rerun
+no attempt counter ignores stored planfile	true	0	true	false	fresh rerun
+no attempt counter, fallback allowed	true	0	false	true	fresh rerun

@@ -8,8 +8,8 @@ import (
 )
 
 // Local is the Null CI: a laptop or an unsupported CI. It knows nothing about
-// the run (Attempt 0 means "unknown", which the superseded-tree guard treats
-// as a possible re-run). Step outputs go to $TFPR_OUTPUT_FILE, or stdout when
+// the run (Attempt 0 means "unknown", which every policy treats as a possible
+// re-run). Step outputs go to $TFPR_OUTPUT_FILE, or stdout when
 // it is unset, and logs go to stderr.
 type Local struct {
 	env         Env

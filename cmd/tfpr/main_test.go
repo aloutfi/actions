@@ -511,10 +511,20 @@ func TestResolvePlanRun(t *testing.T) {
 
 // Outside a supported CI, outputs go to stdout and nothing calls the network.
 func TestLocal(t *testing.T) {
-	s := newScenario(t).set("GITHUB_ACTIONS", "", "TFPR_USE_PLANFILE", "true")
+	s := newScenario(t).set("GITHUB_ACTIONS", "")
 	r := s.run("decide")
 	eq(t, "decide: exit code", 0, r.rc)
-	has(t, "decide: outputs on stdout", r.out, "download=true\nartifact_name=tfplan-stack-default\n")
+	has(t, "decide: outputs on stdout", r.out, "download=false\nartifact_name=tfplan-stack-default\n")
+
+	// No attempt counter: even a reviewed planfile is not trusted.
+	s = newScenario(t).set("GITHUB_ACTIONS", "", "TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact")
+	s.planArtifact("stack", "default")
+	r = s.run("decide")
+	has(t, "decide: no download", r.out, "download=false")
+	s.planArtifact("stack", "default")
+	r = s.run("apply")
+	eq(t, "planfile apply refused", 1, r.rc)
+	lacks(t, "planfile apply refused: no apply", r.tf, "terraform apply")
 
 	r = newScenario(t).set("GITHUB_ACTIONS", "").run("apply")
 	eq(t, "fresh apply refused", 1, r.rc)

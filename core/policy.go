@@ -12,6 +12,12 @@ const (
 	SourceNone     = "none"     // refuse to apply
 )
 
+// IsFirstAttempt reports whether attempt is known to be a run's first
+// attempt. 0 means the CI has no attempt counter; every policy treats that
+// like a re-run, so an unknown attempt never applies a stored planfile and
+// always gets the strictest superseded-tree check.
+func IsFirstAttempt(attempt int) bool { return attempt == 1 }
+
 // Decision is what apply runs, and why when it is not the reviewed planfile.
 type Decision struct{ Source, Reason string }
 
@@ -24,7 +30,7 @@ func DecidePlanSource(usePlanfile bool, attempt int, hasPlanfile, allowFallback 
 	switch {
 	case !usePlanfile:
 		return Decision{SourceFresh, "no-artifact-requested"}
-	case attempt > 1:
+	case !IsFirstAttempt(attempt):
 		// The stored plan reflects state before the failed attempt; applying it
 		// risks "Saved plan is stale" or a partial roll-forward. The re-run
 		// applies a fresh plan instead, which the superseded-tree guard limits to
@@ -61,13 +67,11 @@ type GuardResult struct {
 // has moved on, applying it rolls back everything merged since. Only the
 // branch head may fresh-apply. Planfile applies skip this check, because
 // terraform rejects a planfile whose state moved.
-//
-// attempt 0 means the CI has no attempt counter; it is treated like a re-run.
 // branchHead looks up the current head of a branch.
 func SupersededGuard(ref, sha string, attempt int, branchHead func(branch string) (string, error)) GuardResult {
 	branch, ok := strings.CutPrefix(ref, "refs/heads/")
 	if !ok {
-		if attempt != 1 {
+		if !IsFirstAttempt(attempt) {
 			return GuardResult{GuardUnverified, "error", fmt.Sprintf(
 				"Re-run apply refused: cannot verify staleness for non-branch ref '%s'. Trigger a fresh run instead.", ref)}
 		}
