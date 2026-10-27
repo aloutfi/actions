@@ -9,13 +9,17 @@ standard library only) with thin GitHub Actions wrappers.
   text. The full plan goes to the job summary and a `plan.txt` artifact, and
   the comment links both. Can upload the binary planfile as an artifact. See
   [docs/plan-comment.md](docs/plan-comment.md).
-- `apply`: applies the reviewed planfile from that artifact, or a fresh plan,
-  then posts the result on the PR that produced the commit.
-- `resolve-plan-run`: finds the PR's plan run for a merge commit, so apply can
-  download that run's planfile.
+- `apply`: gates, then applies the reviewed planfile from that artifact (or a
+  fresh plan), then posts the result on the PR that merged the commit. A
+  commit that is no longer its branch's head is a clean skip.
+- `gate`: the same decision with only the GitHub token, so a separate apply
+  job can be skipped. Opt-in: skip the apply when the PR's plan was a no-op.
+- `report`: posts the result of an apply you ran yourself.
+- Drift: `plan` with `mode: drift` on a schedule touches no PR, writes the
+  full plan to the job summary and warns when a stack drifted.
 
-Azure Pipelines and Azure Repos are supported for the PR flow (plan, then
-comment); see [docs/azure-devops.md](docs/azure-devops.md).
+Azure Pipelines and Azure Repos are supported for the PR flow, the apply on
+the main branch and drift checks; see [docs/azure-devops.md](docs/azure-devops.md).
 
 ## Usage
 
@@ -48,6 +52,7 @@ jobs:
 
 ```yaml
 # On push to main: apply the planfile reviewed on the PR
+concurrency: apply-infra-prod # one apply at a time; superseded runs skip cleanly
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -59,16 +64,55 @@ jobs:
       EXAMPLE_PROVIDER_TOKEN: ${{ secrets.EXAMPLE_PROVIDER_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - id: plan-run
-        uses: aloutfi/actions/resolve-plan-run@vX.Y.Z # a release tag, or its commit SHA
-        with:
-          plan_workflow_filename: pr.yaml
       - uses: aloutfi/actions/apply@vX.Y.Z # a release tag, or its commit SHA
         with:
           stack: infra/
           workspace: prod
-          use_planfile: ${{ steps.plan-run.outputs.run_id != '' }}
-          plan_artifact_run_id: ${{ steps.plan-run.outputs.run_id }}
+          use_planfile: "true" # the plan run comes from tfpr's comment record on the merged PR
+```
+
+To skip the whole apply job (and its cloud credentials) when there is
+nothing to apply, gate in a cheap job first:
+
+```yaml
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, pull-requests: read }
+    outputs:
+      apply: ${{ steps.gate.outputs.apply }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: gate
+        uses: aloutfi/actions/gate@vX.Y.Z
+        with:
+          stack: infra/
+          workspace: prod
+          skip_noop: "true" # opt-in: skip when the PR's reviewed plan was a no-op
+  apply:
+    needs: gate
+    if: needs.gate.outputs.apply == 'true'
+    # ... the apply job above
+```
+
+```yaml
+# On a schedule: drift detection, no PR involved
+on:
+  schedule: [{ cron: "0 6 * * *" }]
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { stack: [infra/net, infra/app] }
+    env:
+      EXAMPLE_PROVIDER_TOKEN: ${{ secrets.EXAMPLE_PROVIDER_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: aloutfi/actions/plan@vX.Y.Z
+        with:
+          stack: ${{ matrix.stack }}
+          mode: drift
+          fail_on_drift: "true" # optional: fail the job when the stack drifted
 ```
 
 ### Credentials
@@ -238,8 +282,13 @@ merge-time stage reads it back from the bot's own comment.
 | `comment_author` | `github-actions[bot]` | Only comments by this login are updated |
 | `token` | `github.token` | GitHub API token |
 
+| `mode` | `pr` | `drift`: a scheduled drift check. No PR is touched; the full plan goes to the job summary; a warning names the stack if it drifted |
+| `fail_on_drift` | `false` | In drift mode, fail the job when the stack drifted |
+
 Outputs: `exit_code`, `has_changes`, `has_imports`, `has_output_changes`,
-`summary`, `plan_artifact_name`, `plan_text_url`.
+`summary`, `plan_artifact_name`, `plan_text_url`, and in drift mode `drifted`
+(`true` when the plan would change anything). For several stacks, run one
+job per stack (a matrix) and combine their `drifted` outputs.
 
 The comment step runs on every run that was not cancelled. Outside a pull
 request it writes only the job summary.
@@ -251,11 +300,13 @@ request it writes only the job summary.
 | `stack`, `workspace`, `terraform_version` | | Same as plan |
 | `use_planfile` | `false` | Download and apply the plan action's planfile |
 | `allow_fresh_plan_fallback` | `false` | If the planfile is missing on the first attempt, apply a fresh plan instead of failing |
-| `plan_artifact_run_id` | current run | Run that uploaded the planfile |
+| `plan_artifact_run_id` | from the PR's record | Run that uploaded the planfile; by default the run named in tfpr's comment record on the merged PR, else the current run |
+| `skip_noop` | `false` | Skip the apply when the PR's reviewed plan was a no-op (see gate) |
 | `lock_timeout` | `5m` | `terraform apply -lock-timeout` |
 | `comment_author`, `token` | | Same as plan |
 
-Outputs: `apply_exit_code`, `used_plan_artifact`, `fallback_reason`.
+Outputs: `action` (`apply`, `skip`, `refuse`), `apply_exit_code` (empty when
+skipped), `used_plan_artifact`, `fallback_reason`.
 
 How apply chooses what to run:
 
@@ -270,26 +321,57 @@ The planfile is downloaded outside the checkout, and its `plan-metadata.json`
 must name the same `stack` and `workspace` as the apply. A `tfplan` already
 in the stack directory is never treated as the reviewed plan.
 
-Every fresh apply (any row above that says "fresh plan") first checks that the
-run's commit is still the head of its branch. Applying an older commit's tree
-with `-auto-approve` would roll back everything merged since, so:
+Before anything else, apply checks that the run's commit is still the head of
+its branch. Applying an older commit's tree would roll back everything merged
+since, so:
 
-- On a branch ref, a fresh apply of a commit that is no longer the branch head
-  is refused, on any attempt. The newer run applies the newer tree.
+- On a branch ref, a commit that is no longer the branch head is a **clean
+  skip** (`action: skip`, reason `superseded`, exit 0), on any attempt, with
+  or without a planfile. The run for the newer head applies the newer tree,
+  which includes this commit's changes. The result comment says "Superseded
+  by `<sha>`" and links that run. Run applies one at a time (`concurrency:`)
+  so the newest run always comes last.
 - On a non-branch ref (tag, PR merge ref), there is no head to compare against.
   The first attempt applies with a warning; re-runs are refused.
-- Planfile applies skip this check. Terraform itself rejects a planfile whose
-  state has changed since it was made.
+- If the branch head can't be read, the apply is refused.
 
-### resolve-plan-run
+### gate
+
+The decision of `apply` alone, with only the GitHub token, for a job that runs
+before the one holding cloud credentials. It writes `decision.json` to the
+stack's plan dir.
 
 | Input | Default | |
 |---|---|---|
-| `plan_workflow_filename` | `pr.yaml` | Workflow file that ran the plan |
-| `token` | `github.token` | Needs `actions: read` |
+| `stack`, `workspace` | | Same as plan |
+| `skip_noop` | `false` | Skip when the PR's reviewed plan was a no-op (below) |
+| `comment_author`, `token` | | Same as plan |
 
-Outputs: `run_id` and `pr_number`. Both are empty on a re-run, on a direct push,
-when several PRs match, or when no successful plan run exists.
+Outputs: `apply` (`true`/`false`), `action`, `reason`, `pr_number`,
+`plan_run_id`.
+
+With `skip_noop`, the apply is skipped only when **all** of these hold. Any
+doubt applies, and `reason` says which check failed:
+
+- it is the run's first attempt;
+- exactly one PR merged the commit;
+- that PR has exactly one plan record for this stack, written by tfpr's own
+  identity (a record anyone else wrote is ignored);
+- the record's plan was a no-op;
+- the merged commit's git tree is the tree that was planned.
+
+### report
+
+Posts the result of a `terraform apply` you ran yourself on the merged PR.
+Run it with `if: ${{ !cancelled() }}`. If a gate in the same job skipped or
+refused the apply, it reports that and needs no exit code.
+
+| Input | Default | |
+|---|---|---|
+| `stack`, `workspace` | | Same as plan |
+| `apply_exit_code` | | Your apply's exit code |
+| `apply_log` | | Your apply's output, scrubbed; filtered and cut to fit, keeping the end |
+| `comment_author`, `token` | | Same as plan |
 
 ### How the actions get `tfpr`
 
