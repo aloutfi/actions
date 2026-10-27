@@ -92,6 +92,7 @@ type GuardResult struct {
 	Code    int
 	Level   string
 	Message string
+	Head    string // the branch head, when it was read
 }
 
 // SupersededGuard decides whether a fresh apply of sha (built from ref) may
@@ -105,21 +106,21 @@ func SupersededGuard(ref, sha string, attempt int, branchHead func(branch string
 	if !ok {
 		if !IsFirstAttempt(attempt) {
 			return GuardResult{GuardUnverified, "error", fmt.Sprintf(
-				"Re-run apply refused: cannot verify staleness for non-branch ref '%s'. Trigger a fresh run instead.", ref)}
+				"Re-run apply refused: cannot verify staleness for non-branch ref '%s'. Trigger a fresh run instead.", ref), ""}
 		}
 		// First attempt on a tag or other ref: nothing to compare against.
 		return GuardResult{GuardOK, "warning", fmt.Sprintf(
-			"Fresh apply of non-branch ref '%s': there is no branch head to compare against, so the superseded-tree check is skipped.", ref)}
+			"Fresh apply of non-branch ref '%s': there is no branch head to compare against, so the superseded-tree check is skipped.", ref), ""}
 	}
 	head, err := branchHead(branch)
 	if err != nil {
 		return GuardResult{GuardUnverified, "error", fmt.Sprintf(
-			"Fresh apply refused: could not read the head of '%s' to rule out applying a superseded tree.", branch)}
+			"Fresh apply refused: could not read the head of '%s' to rule out applying a superseded tree.", branch), ""}
 	}
 	if head != sha {
-		return GuardResult{GuardSuperseded, "error", fmt.Sprintf(
-			"Fresh apply refused (attempt=%d): commit %s is no longer the head of '%s' (now %s). Applying a superseded tree with -auto-approve would roll back later merges. Let the newest run for this branch apply, or re-run that one.",
-			attempt, sha, branch, head)}
+		return GuardResult{GuardSuperseded, "warning", fmt.Sprintf(
+			"Skipping the apply (attempt=%d): commit %s is no longer the head of '%s' (now %s). Applying its tree would roll back later merges; the run for %s applies these changes.",
+			attempt, sha, branch, head, head), head}
 	}
-	return GuardResult{GuardOK, "", fmt.Sprintf("Superseded-tree check passed: %s is the head of '%s'.", sha, branch)}
+	return GuardResult{GuardOK, "", fmt.Sprintf("Superseded-tree check passed: %s is the head of '%s'.", sha, branch), head}
 }

@@ -562,7 +562,7 @@ func TestApplySupersededGuard(t *testing.T) {
 	s.gh.branchHead = "def"
 	r = s.run("apply")
 	eq(t, "branch moved: refused", 1, r.rc)
-	has(t, "branch moved: error", r.out, "::error::Fresh apply refused (attempt=1): commit abc is no longer the head of 'main' (now def)")
+	has(t, "branch moved: error", r.out, "::warning::Skipping the apply (attempt=1): commit abc is no longer the head of 'main' (now def)")
 	lacks(t, "branch moved: no apply", r.tf, "terraform apply")
 	has(t, "branch moved: reason", r.outputs, "fallback_reason=superseded")
 	golden(t, "comments/apply-superseded.md", r.body)
