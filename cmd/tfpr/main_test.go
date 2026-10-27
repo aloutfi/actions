@@ -1135,7 +1135,7 @@ func TestAzureReposComment(t *testing.T) {
 	has(t, "record property", props["tfpr.record"].(map[string]any)["$value"].(string), `"status":"no_op"`)
 	content := ado.created["comments"].([]any)[0].(map[string]any)["content"].(string)
 	lacks(t, "no hidden markup in the text", content, "<!--")
-	has(t, "the plan", content, "Terraform Plan")
+	has(t, "the plan", content, "Terraform plan")
 	eq(t, "no GitHub calls", "", r.api)
 }
 
