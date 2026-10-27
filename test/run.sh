@@ -214,6 +214,12 @@ for action in plan apply resolve-plan-run; do
   assert_lacks "${action} runs no bash core" "$(cat "${root}/${action}/action.yml")" "bin/tfpr"
 done
 
+# install-tfpr.sh: a supplied binary is used as-is, on any runner.
+: > "${sandbox}/install"
+GITHUB_OUTPUT="${sandbox}/install" RUNNER_OS=Plan9 RUNNER_ARCH=mips TFPR_BIN="${tfpr}" \
+  "${root}/scripts/install-tfpr.sh" > /dev/null
+assert_eq "install-tfpr.sh honours TFPR_BIN on any runner" "path=${tfpr}" "$(cat "${sandbox}/install")"
+
 # Third-party actions are pinned to a full commit SHA.
 unpinned="$(grep -hE '^[[:space:]-]*uses: ' "${root}"/*/action.yml "${root}"/.github/workflows/*.yml |
   grep -vE 'uses: \./|@[0-9a-f]{40}( |$)' || true)"

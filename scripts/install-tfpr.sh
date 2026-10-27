@@ -25,6 +25,14 @@ die() {
   exit 1
 }
 
+# A supplied binary needs no platform detection, so it works on any runner.
+if [[ "${1:-locate}" == "locate" && -n "${TFPR_BIN:-}" ]]; then
+  [[ -x "${TFPR_BIN}" ]] || die "TFPR_BIN '${TFPR_BIN}' is not an executable file"
+  echo "Using TFPR_BIN=${TFPR_BIN}"
+  echo "path=${TFPR_BIN}" >> "${out}"
+  exit 0
+fi
+
 case "${RUNNER_OS:-$(uname -s)}" in
   Linux) os=linux ;;
   macOS | Darwin) os=darwin ;;
@@ -46,12 +54,6 @@ sha256_check() {
 
 case "${1:-locate}" in
   locate)
-    if [[ -n "${TFPR_BIN:-}" ]]; then
-      [[ -x "${TFPR_BIN}" ]] || die "TFPR_BIN '${TFPR_BIN}' is not an executable file"
-      echo "Using TFPR_BIN=${TFPR_BIN}"
-      echo "path=${TFPR_BIN}" >> "${out}"
-      exit 0
-    fi
     entry=""
     if [[ -f "${root}/checksums.txt" ]]; then
       entry="$(grep -E "^[0-9a-f]{64}  tfpr_[^ ]+_${os}_${arch}\.tar\.gz$" "${root}/checksums.txt" | head -n 1 || true)"
