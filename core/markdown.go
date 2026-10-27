@@ -19,7 +19,7 @@ var funcMap = template.FuncMap{
 	"code":    code,
 	"plural":  plural,
 	"details": func(open bool, summary, body string) string { return details(HostFor(""), open, summary, body) },
-	"short":   short,
+	"short":   Short,
 }
 
 // funcsFor binds details to host.
@@ -90,8 +90,8 @@ func details(host Host, open bool, summary, body string) string {
 	return "<details" + attr + "><summary>" + html.EscapeString(summary) + "</summary>\n\n" + body + "\n\n</details>"
 }
 
-// short is the first 7 characters of a commit id.
-func short(sha string) string {
+// Short is the first 7 characters of a commit id.
+func Short(sha string) string {
 	if len(sha) > 7 {
 		return sha[:7]
 	}

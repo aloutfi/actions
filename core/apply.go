@@ -53,7 +53,7 @@ func RenderApplyReport(r ApplyReport) (string, error) {
 	switch {
 	case r.Gate.Action == GateRefuse:
 		v.Icon, v.Status, v.Failed = "🛑", "refused", true
-		v.Explain = "tfpr could not verify that " + code(short(r.SHA)) + " is still the head of its branch, so applying it might roll back later merges. Re-run from the branch's newest commit."
+		v.Explain = "tfpr could not verify that " + code(Short(r.SHA)) + " is still the head of its branch, so applying it might roll back later merges. Re-run from the branch's newest commit."
 	case r.Gate.Action == GateSkip && r.Gate.Reason == "superseded":
 		v.Icon, v.Status = "⏭️", "skipped: superseded"
 	case r.Gate.Action == GateSkip:

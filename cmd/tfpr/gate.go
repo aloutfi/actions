@@ -100,7 +100,7 @@ func (a *app) runGate(v vcs.VCS) core.GateResult {
 	g.Action, g.Reason = d.Action, d.Reason
 	switch {
 	case d.Reason == "no-op":
-		a.ci.Log(ci.Notice, fmt.Sprintf("Skipping the apply of '%s': the reviewed plan had no changes, and %s's tree is the tree that was planned.", a.stack, short(c.SHA)))
+		a.ci.Log(ci.Notice, fmt.Sprintf("Skipping the apply of '%s': the reviewed plan had no changes, and %s's tree is the tree that was planned.", a.stack, core.Short(c.SHA)))
 	case d.Action == core.GateApply && in.SkipNoop:
 		a.ci.Log(ci.Notice, fmt.Sprintf("Applying '%s': it can't be skipped as a no-op (%s).", a.stack, d.Reason))
 	}
@@ -216,12 +216,4 @@ func (a *app) publishApply(v vcs.VCS, r core.ApplyReport) error {
 	}
 	fmt.Fprintln(a.stdout, msg)
 	return nil
-}
-
-// short is the first 7 characters of a commit id.
-func short(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
 }
