@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/aloutfi/actions/core"
 )
@@ -299,4 +300,34 @@ func TestReportUsesTheGatesPR(t *testing.T) {
 	r = s.run("report")
 	has(t, "one PR: posts", r.api, "POST /repos/o/r/issues/42/comments")
 	eq(t, "one PR: one lookup", 1, strings.Count(r.api, "/commits/abc/pulls"))
+}
+
+// The apply result honours TFPR_COMMENT_BUDGET after the filter: a filter
+// that grows the text trims the log further, and in the worst case the
+// result is posted without it.
+func TestApplyCommentBudget(t *testing.T) {
+	var log strings.Builder
+	for i := 0; i < 500; i++ {
+		fmt.Fprintf(&log, "terraform_data.item[%d]: Creating... a a a a a a\n", i)
+	}
+	log.WriteString("Apply complete! Resources: 500 added, 0 changed, 0 destroyed.\n")
+	for name, filter := range map[string]string{
+		"filter grows the text": "sed 's/a/aaaa/g'",
+		"filter grows it a lot": "sed 's/./&&&&&&&&&&/g'",
+	} {
+		s := newScenario(t).set("TFPR_APPLY_EXIT_CODE", "0", "TFPR_APPLY_LOG", "apply.log", "TFPR_COMMENT_BUDGET", "3000", "TFPR_FILTER", filter)
+		s.write("apply.log", log.String())
+		s.run("gate")
+		r := s.run("report")
+		eq(t, name+": exit code", 0, r.rc)
+		if n := utf8.RuneCountInString(r.body); n > 3000 {
+			t.Errorf("%s: %d characters, over the 3,000 budget", name, n)
+		}
+		has(t, name+": posted", r.api, "POST /repos/o/r/issues/42/comments")
+		if name == "filter grows the text" {
+			has(t, name+": keeps the log's end", r.body, "Apply complete! Resources: 500 ")
+		} else {
+			lacks(t, name+": minimal body without the log", r.body, "Apply output")
+		}
+	}
 }

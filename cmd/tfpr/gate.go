@@ -121,6 +121,45 @@ func (a *app) runGate(v vcs.VCS) core.GateResult {
 	return g
 }
 
+// renderApply renders the apply-result body within the comment budget
+// (TFPR_COMMENT_BUDGET, at most the host's limit) and filters it. If the
+// filter grows it past the budget, the apply log's tail is trimmed further
+// and the body rendered again; failing that, the body goes without the log;
+// failing that, it is an error.
+func (a *app) renderApply(r core.ApplyReport, marker string) (redact.Text, error) {
+	limit, err := commentLimit(r.Host)
+	if err != nil {
+		return redact.Text{}, err
+	}
+	if r.Host.HiddenHTML { // the marker goes above the body
+		limit -= utf8.RuneCountInString(marker) + 1
+	}
+	r.Budget = limit
+	for tries := 0; ; tries++ {
+		raw, err := core.RenderApplyReport(r)
+		if err != nil {
+			return redact.Text{}, err
+		}
+		body, err := a.filter.Apply(raw)
+		if err != nil {
+			return body, err
+		}
+		n := utf8.RuneCountInString(body.String())
+		switch {
+		case n <= limit:
+			return body, nil
+		case r.Log == "":
+			return body, fmt.Errorf("the filtered apply-result comment is %d characters, over its %d-character budget", n, limit)
+		case tries >= 3: // the minimal body: no log
+			r.Log = ""
+		default:
+			// The filter scales the text, so scale the render budget by how
+			// far over it came out, with a margin.
+			r.Budget = r.Budget*limit/n - 100
+		}
+	}
+}
+
 // mergedPRs are the PRs the repo host says merged this commit; none if it
 // can't say.
 func (a *app) mergedPRs(v vcs.VCS) []vcs.PR {
@@ -239,15 +278,7 @@ func (a *app) publishApply(v vcs.VCS, r core.ApplyReport) error {
 	marker := core.ApplyMarker(a.stack, a.workspace)
 	r.Stack, r.Workspace, r.SHA, r.JobURL, r.ToolVersion = a.stack, a.workspace, sha, a.ci.JobURL(), version
 	r.Host = a.commentHost()
-	r.Budget = r.Host.MaxComment
-	if r.Host.HiddenHTML {
-		r.Budget -= utf8.RuneCountInString(marker) + 1
-	}
-	raw, err := core.RenderApplyReport(r)
-	if err != nil {
-		return err
-	}
-	body, err := a.filter.Apply(raw)
+	body, err := a.renderApply(r, marker)
 	if err != nil {
 		return err
 	}
