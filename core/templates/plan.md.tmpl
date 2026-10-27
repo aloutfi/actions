@@ -72,7 +72,7 @@ Outputs: {{range $i, $o := .}}{{if $i}}, {{end}}{{code $o.Name}} ({{$o.Action}}{
 {{end}}{{end}}
 
 {{- define "footer"}}
-{{with .Result.Source.SHA}}Commit {{code (short .)}} · {{end}}{{with .Links.Job}}[job log]({{.}}) · {{end}}{{with .Links.Summary}}[full plan]({{.}}) · {{end}}tfpr {{or .Result.Tool.Version "dev"}}{{with .Result.Tool.BinaryVersion}} · {{$.Result.Tool.Binary}} {{.}}{{end}} · redaction: {{or .Result.Redaction.Mode "none"}}
+{{with .Result.Source}}{{if and .HeadSHA (ne .HeadSHA .SHA)}}Commit {{code (short .HeadSHA)}} (planned as merge {{code (short .SHA)}}) · {{else if .SHA}}Commit {{code (short .SHA)}} · {{end}}{{end}}{{with .Links.Job}}[job log]({{.}}) · {{end}}{{with .Links.Summary}}[full plan]({{.}}) · {{end}}tfpr {{or .Result.Tool.Version "dev"}}{{with .Result.Tool.BinaryVersion}} · {{$.Result.Tool.Binary}} {{.}}{{end}} · redaction: {{or .Result.Redaction.Mode "none"}}
 {{end}}
 
 {{- define "minimal"}}{{template "header" .}}{{template "banner" .}}{{if eq .Status "error"}}{{template "failed" .}}{{else}}{{template "counts" .}}{{end}}{{template "footer" .}}{{end -}}

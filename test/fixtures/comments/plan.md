@@ -14,4 +14,4 @@ and found no differences, so no changes are needed.
 
 </details>
 
-Commit `abc` · [job log](https://github.example/o/r/actions/runs/1) · [full plan](https://github.example/o/r/actions/runs/1) · tfpr dev · redaction: none
+Commit `prhead` (planned as merge `abc`) · [job log](https://github.example/o/r/actions/runs/1) · [full plan](https://github.example/o/r/actions/runs/1) · tfpr dev · redaction: none

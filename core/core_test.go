@@ -220,3 +220,23 @@ func TestBodyCannotForgeControlLines(t *testing.T) {
 		t.Errorf("stripped too much:\n%s", body)
 	}
 }
+
+// The footer leads with the commit reviewers know, the PR head; the merge
+// commit that was planned comes second.
+func TestFooterShowsPRHead(t *testing.T) {
+	for _, c := range []struct{ sha, head, want string }{
+		{"7c79a8b1234", "ac9f6121234", "Commit `ac9f612` (planned as merge `7c79a8b`) · "},
+		{"7c79a8b1234", "", "Commit `7c79a8b` · "},
+		{"7c79a8b1234", "7c79a8b1234", "Commit `7c79a8b` · "},
+	} {
+		r := NewPlanResult(PlanResult{Target: Target{Stack: "s", Workspace: "w"}, Source: Source{SHA: c.sha, HeadSHA: c.head}},
+			[]Unit{{Path: ".", Status: StatusNoOp, Skippable: true}})
+		body, err := RenderPlan(PlanComment{Result: r, Host: HostFor("github"), Texts: map[string]string{".": "No changes.\n"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(body, c.want) {
+			t.Errorf("sha %s head %q: want %q in\n%s", c.sha, c.head, c.want, body)
+		}
+	}
+}
