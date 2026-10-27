@@ -96,6 +96,6 @@
     }
   ],
   "redaction": {
-    "mode": "byo"
+    "mode": "none"
   }
 }

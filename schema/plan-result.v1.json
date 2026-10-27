@@ -83,7 +83,7 @@
       "type": "object",
       "required": ["mode"],
       "properties": {
-        "mode": { "enum": ["none", "filter", "byo"], "description": "filter: TFPR_FILTER ran over the plan text and the names from plan.json. none: no filter configured. byo: caller-supplied text and no TFPR_FILTER" }
+        "mode": { "enum": ["none", "filter", "byo"], "description": "filter: TFPR_FILTER ran over the plan text and over the resource addresses and output names copied from plan.json. none: no filter ran, so those names are as plan.json had them (a caller's own scrubber over plan.txt does not cover them). byo is reserved for a caller that hands tfpr names it has already filtered; tfpr does not write it today" }
       }
     },
     "render": {

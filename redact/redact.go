@@ -39,9 +39,8 @@ import (
 
 // Redaction modes, as recorded in plan-result.json.
 const (
-	ModeNone   = "none"   // no filter configured
-	ModeFilter = "filter" // TFPR_FILTER ran over the text
-	ModeBYO    = "byo"    // caller-supplied text, no TFPR_FILTER: the caller's scrubber is trusted
+	ModeNone   = "none"   // no filter ran: names from plan.json are unfiltered
+	ModeFilter = "filter" // TFPR_FILTER ran over the plan text and the names
 )
 
 // ErrFailed wraps every filter failure.

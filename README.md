@@ -109,7 +109,14 @@ idempotent, because the plan text is filtered once when it is stored and
 again inside the comment body. They must also keep one output line per input
 line, because names are filtered one per line. The filter does not see tfpr's
 own `TFPR_*` variables. `plan-result.json` records whether a filter ran
-(`redaction.mode`: `filter`, `none`, or `byo`).
+(`redaction.mode`: `filter` or `none`).
+
+Resource addresses and output names come from `plan.json`, so a scrubber
+you run over `plan.txt` never sees them. They reach `plan-result.json`
+unfiltered unless `TFPR_FILTER` is set. They are filtered again in any
+comment body, but `plan-result.json` itself keeps them as they were. If
+for_each keys can be sensitive, set `TFPR_FILTER`, even when you already
+scrub `plan.txt` yourself.
 
 ```sh
 # Mask anything that looks like a key or a password assignment.

@@ -685,11 +685,13 @@ func TestBYOFilter(t *testing.T) {
 	has(t, "plan-result.json", res, `"runner": "byo"`)
 	has(t, "plan-result.json", res, `"mode": "filter"`)
 
-	// Without TFPR_FILTER, the caller's scrubber is trusted: mode byo. The
-	// egress filter still covers every name in the comment body.
+	// Without TFPR_FILTER, nothing filtered the names from plan.json, so the
+	// result does not claim it: mode none. The egress filter still covers
+	// every name in the comment body.
 	s = newScenario(t)
 	s.byo("changes")
-	has(t, "no filter: mode", s.planResult(), `"mode": "byo"`)
+	has(t, "no filter: mode", s.planResult(), `"mode": "none"`)
+	has(t, "no filter: names as plan.json had them", s.planResult(), `terraform_data.item[\"beta\"]`)
 	s.set("GITHUB_EVENT_NAME", "pull_request", "TFPR_FILTER", `sed 's/"beta"/"REDACTED"/g'`)
 	r := s.run("comment")
 	eq(t, "comment: exit code", 0, r.rc)

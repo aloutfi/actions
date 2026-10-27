@@ -44,10 +44,9 @@ var errNoPlanResult = errors.New("no plan-result.json")
 func (a *app) derive() (err error) {
 	a.loadCI()
 	var exit *int
+	// The mode reflects only TFPR_FILTER: a caller's own scrubber saw
+	// plan.txt, never the names tfpr copies from plan.json.
 	mode := a.filter.Mode()
-	if mode == redact.ModeNone {
-		mode = redact.ModeBYO
-	}
 	tool := core.Tool{Runner: "byo"}
 	defer func() {
 		if err != nil {
