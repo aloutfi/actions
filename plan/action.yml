@@ -60,8 +60,27 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Locate tfpr
+      id: tfpr
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh"'
+
+    # Unreleased refs (no checksums.txt entry) build tfpr from source.
+    - name: Set up Go
+      if: steps.tfpr.outputs.build == 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: ${{ github.action_path }}/../go.mod
+        cache: false
+
+    - name: Build tfpr
+      id: tfpr-src
+      if: steps.tfpr.outputs.build == 'true'
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh" build'
+
     - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v4
+      uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
       with:
         terraform_version: ${{ inputs.terraform_version }}
         terraform_wrapper: false
@@ -70,13 +89,14 @@ runs:
       id: plan
       shell: bash
       env:
+        TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
         TFPR_STACK: ${{ inputs.stack }}
         TFPR_WORKSPACE: ${{ inputs.workspace }}
-      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" plan'
+      run: '"${TFPR}" plan'
 
     - name: Upload plan artifact
       if: inputs.output_planfile == 'true'
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ steps.plan.outputs.plan_artifact_name }}
         path: |
@@ -89,9 +109,10 @@ runs:
       if: github.event_name == 'pull_request'
       shell: bash
       env:
+        TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
         TFPR_STACK: ${{ inputs.stack }}
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_EXIT_CODE: ${{ steps.plan.outputs.exit_code }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
         GH_TOKEN: ${{ inputs.token }}
-      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" comment'
+      run: '"${TFPR}" comment'
