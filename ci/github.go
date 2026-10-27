@@ -154,11 +154,17 @@ func (g *GitHub) SummaryURL() string {
 }
 
 // RunFor links to this workflow's run for sha (the Actions runs API,
-// filtered by head_sha), else to the commit.
+// filtered by head_sha), else to the commit. Without the workflow
+// (GITHUB_WORKFLOW_REF), any run for sha could be some other workflow's, so
+// it links the commit.
 func (g *GitHub) RunFor(sha string) string {
 	repo := g.env("GITHUB_REPOSITORY")
+	commit := g.env("GITHUB_SERVER_URL") + "/" + repo + "/commit/" + sha
 	// GITHUB_WORKFLOW_REF is owner/repo/<path>@<ref>; runs carry <path>.
 	workflow, _, _ := strings.Cut(strings.TrimPrefix(g.env("GITHUB_WORKFLOW_REF"), repo+"/"), "@")
+	if workflow == "" {
+		return commit
+	}
 	var runs struct {
 		WorkflowRuns []struct {
 			HTMLURL string `json:"html_url"`
@@ -169,12 +175,12 @@ func (g *GitHub) RunFor(sha string) string {
 	q := url.Values{"head_sha": {sha}, "per_page": {"30"}}
 	if _, err := g.api.Do(http.MethodGet, "/repos/"+repo+"/actions/runs?"+q.Encode(), nil, &runs); err == nil {
 		for _, r := range runs.WorkflowRuns {
-			if r.HeadSHA == sha && (workflow == "" || r.Path == workflow) && r.HTMLURL != "" {
+			if r.HeadSHA == sha && r.Path == workflow && r.HTMLURL != "" {
 				return r.HTMLURL
 			}
 		}
 	}
-	return g.env("GITHUB_SERVER_URL") + "/" + repo + "/commit/" + sha
+	return commit
 }
 
 // SetOutput appends name=value to $GITHUB_OUTPUT.

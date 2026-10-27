@@ -235,4 +235,10 @@ func TestGitHubRunFor(t *testing.T) {
 	if got := g.RunFor("nope"); got != "https://gh.example/o/r/commit/nope" {
 		t.Errorf("no run: %s", got)
 	}
+	// Without the workflow, a run for the commit could be another workflow's.
+	g = newGitHub(envOf(map[string]string{"GITHUB_REPOSITORY": "o/r", "GITHUB_SERVER_URL": "https://gh.example"}),
+		io.Discard, io.Discard, vcs.NewGitHubClient(srv.URL, ""))
+	if got := g.RunFor("def"); got != "https://gh.example/o/r/commit/def" {
+		t.Errorf("no workflow: %s", got)
+	}
 }
