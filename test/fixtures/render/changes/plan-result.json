@@ -1,0 +1,101 @@
+{
+  "schema": "tfpr/plan-result@1",
+  "tool": {
+    "version": "<version>",
+    "runner": "byo",
+    "plan_format_version": "1.2"
+  },
+  "target": {
+    "stack": "changes",
+    "workspace": "default",
+    "key": "changes:default"
+  },
+  "source": {
+    "sha": "",
+    "tree": "",
+    "pr": null
+  },
+  "run": {
+    "ci": "local",
+    "attempt": 0
+  },
+  "summary": {
+    "exit_code": 2,
+    "status": "changes",
+    "counts": {
+      "create": 1,
+      "update": 1,
+      "delete": 1,
+      "replace": 1,
+      "import": 0,
+      "forget": 0,
+      "move": 0,
+      "read": 0,
+      "output": 0
+    },
+    "units": {
+      "total": 1,
+      "changed": 1,
+      "error": 0,
+      "not_run": 0,
+      "provisional": 0,
+      "apply_needed": 1
+    }
+  },
+  "units": [
+    {
+      "path": ".",
+      "exit_code": 2,
+      "status": "changes",
+      "counts": {
+        "create": 1,
+        "update": 1,
+        "delete": 1,
+        "replace": 1,
+        "import": 0,
+        "forget": 0,
+        "move": 0,
+        "read": 0,
+        "output": 0
+      },
+      "resources": [
+        {
+          "address": "terraform_data.item[\"alpha\"]",
+          "action": "update",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"beta\"]",
+          "action": "delete",
+          "reason": "delete_because_each_key",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"gamma\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.pinned",
+          "action": "replace",
+          "reason": "replace_because_cannot_update",
+          "mode": "managed"
+        }
+      ],
+      "outputs": [],
+      "drift": 0,
+      "text_chars": 1238,
+      "fingerprint": "sha256:e6a40502ca84efd4f81b184a6b4186a29424767f7a2e105a17a51b11a51c43a2",
+      "planfile": {
+        "present": false
+      },
+      "dependencies": [],
+      "state_empty": false,
+      "provisional": false,
+      "skippable": false
+    }
+  ],
+  "redaction": {
+    "mode": "none"
+  }
+}

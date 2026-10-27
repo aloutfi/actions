@@ -19,6 +19,7 @@ const (
 
 // Ctx is what tfpr needs to know about the current run.
 type Ctx struct {
+	CI            string // adapter name: github, local
 	RunID, RunURL string
 	SHA           string // commit being built
 	Ref           string // full ref, e.g. refs/heads/main
@@ -34,7 +35,12 @@ type CI interface {
 	// JobURL links to the current job's logs, falling back to the run URL.
 	JobURL() string
 	SetOutput(name, value string) error
+	// Log writes msg at level, escaped so it is one log line of data.
 	Log(level, msg string)
+	// Inert returns a writer to w whose content the CI will not interpret as
+	// commands, for echoing text tfpr does not control (terraform output, a
+	// rendered comment). Close ends the inert region; it does not close w.
+	Inert(w io.Writer) io.WriteCloser
 }
 
 // Env reads an environment variable; os.Getenv in production.

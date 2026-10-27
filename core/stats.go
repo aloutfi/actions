@@ -1,16 +1,15 @@
-// Package core holds tfpr's pure logic: plan statistics, naming, the apply
-// policies and comment rendering. It performs no I/O; callers pass bytes in and
-// get strings or decisions back.
+// Package core holds tfpr's pure logic: the PlanResult contract and its
+// derivation, naming, the apply policies and comment rendering. It performs no
+// I/O; callers pass bytes in and get values back.
 package core
 
 import (
-	"encoding/json"
 	"fmt"
-	"slices"
 	"strconv"
 )
 
-// Stats counts the changes in a `terraform show -json` plan.
+// Stats are the plan step's change statistics, as its step outputs and the
+// current comment layout show them.
 type Stats struct {
 	Creates, Updates, Destroys, Replaces, Imports, Forgets, Moves, OutputChanges int
 }
@@ -63,60 +62,10 @@ func (s Stats) Fields() []Field {
 	}
 }
 
-// plan is the subset of `terraform show -json` that PlanStats reads.
-// change.actions is ["no-op"|"create"|"read"|"update"|"delete"|"forget"], or
-// ["create","delete"] / ["delete","create"] for a replace. change.importing is
-// set for imports, previous_address for moves. forget comes from
-// removed { lifecycle { destroy = false } }.
-type plan struct {
-	ResourceChanges []struct {
-		Address         string  `json:"address"`
-		PreviousAddress *string `json:"previous_address"`
-		Change          struct {
-			Actions   []string        `json:"actions"`
-			Importing json.RawMessage `json:"importing"`
-		} `json:"change"`
-	} `json:"resource_changes"`
-	OutputChanges map[string]struct {
-		Actions []string `json:"actions"`
-	} `json:"output_changes"`
-}
-
-// PlanStats counts the changes in a `terraform show -json` document.
-func PlanStats(planJSON []byte) (Stats, error) {
-	var p plan
-	if err := json.Unmarshal(planJSON, &p); err != nil {
-		return Stats{}, fmt.Errorf("parse plan JSON: %w", err)
+// StatsOf maps PlanResult counts onto the plan step's statistics.
+func StatsOf(c Counts) Stats {
+	return Stats{
+		Creates: c.Create, Updates: c.Update, Destroys: c.Delete, Replaces: c.Replace,
+		Imports: c.Import, Forgets: c.Forget, Moves: c.Move, OutputChanges: c.Output,
 	}
-	var s Stats
-	for _, rc := range p.ResourceChanges {
-		a := rc.Change.Actions
-		create, del := slices.Contains(a, "create"), slices.Contains(a, "delete")
-		switch {
-		case create && del:
-			s.Replaces++
-		case create:
-			s.Creates++
-		case del:
-			s.Destroys++
-		}
-		if slices.Equal(a, []string{"update"}) {
-			s.Updates++
-		}
-		if slices.Contains(a, "forget") {
-			s.Forgets++
-		}
-		if len(rc.Change.Importing) > 0 && string(rc.Change.Importing) != "null" {
-			s.Imports++
-		}
-		if rc.PreviousAddress != nil && *rc.PreviousAddress != rc.Address {
-			s.Moves++
-		}
-	}
-	for _, oc := range p.OutputChanges {
-		if !slices.Equal(oc.Actions, []string{"no-op"}) {
-			s.OutputChanges++
-		}
-	}
-	return s, nil
 }

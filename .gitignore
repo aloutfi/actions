@@ -4,3 +4,4 @@
 *.tfstate.backup
 tfplan
 test/fixtures/stack/plan*
+.tfpr/

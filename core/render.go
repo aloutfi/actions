@@ -18,21 +18,34 @@ const truncationNotice = "[truncated — download the tfplan artifact and run `t
 
 // PlanComment is everything the plan comment shows.
 type PlanComment struct {
-	Stack, Workspace string
-	ExitCode         string // terraform plan -detailed-exitcode
-	RunID, JobURL    string // the run link
-	Stats            Stats
-	PlanText         []byte // terraform show -no-color output
-	Budget           int    // max bytes of PlanText in the comment
+	Result        PlanResult // exactly one unit in this layout, unless the plan failed
+	PlanText      []byte     // that unit's plan text, already filtered; nil when it failed
+	RunID, JobURL string     // the run link
+	Budget        int        // max bytes of PlanText in the comment
 }
 
-// RenderPlan renders the plan comment body.
+// RenderPlan renders the human-readable part of the plan comment: the part
+// that goes through the redaction filter. The comment's first two lines, the
+// marker (PlanMarker) and the record (Record), are tfpr's own and are
+// prepended unfiltered by the repo-host adapter; the body can never contain
+// such lines (StripControlLines).
 func RenderPlan(c PlanComment) (string, error) {
-	s := c.Stats
+	r := c.Result
+	if r.Summary.Status == StatusError {
+		return renderFailed(c)
+	}
+	if len(r.Units) != 1 {
+		return "", fmt.Errorf("the plan comment layout shows one unit; this result has %d", len(r.Units))
+	}
+	s := StatsOf(r.Summary.Counts)
 	view := struct {
-		PlanComment
-		Marker, Open, Icon, Counts, DiffSummary, PlanText string
-	}{PlanComment: c, Marker: PlanMarker(c.Stack, c.Workspace)}
+		Stack, Workspace, ExitCode, RunID, JobURL string
+		Stats                                     Stats
+		Open, Icon, Counts, DiffSummary, PlanText string
+	}{
+		Stack: r.Target.Stack, Workspace: r.Target.Workspace, ExitCode: strconv.Itoa(r.Summary.ExitCode),
+		RunID: c.RunID, JobURL: c.JobURL, Stats: s,
+	}
 
 	view.Icon = "✅"
 	if s.HasOutputChanges() {
@@ -59,7 +72,44 @@ func RenderPlan(c PlanComment) (string, error) {
 
 	view.DiffSummary = DiffSummary(c.PlanText)
 	view.PlanText = truncate(c.PlanText, c.Budget)
-	return execute("plan.md.tmpl", view)
+	body, err := execute("plan.md.tmpl", view)
+	return StripControlLines(body), err
+}
+
+// controlPrefixes start the lines tfpr reserves for itself in a comment.
+var controlPrefixes = []string{"<!-- tf-plan:", "<!-- tf-apply:", "<!-- tfpr:"}
+
+// StripControlLines removes every line that looks like a comment marker or
+// record, so text from the plan can never forge one.
+func StripControlLines(body string) string {
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(body, "\n") {
+		trimmed := strings.TrimLeft(line, " \t\v\f\r")
+		forged := false
+		for _, p := range controlPrefixes {
+			forged = forged || strings.HasPrefix(trimmed, p)
+		}
+		if !forged {
+			b.WriteString(line)
+		}
+	}
+	return b.String()
+}
+
+// renderFailed renders the comment for a failed plan. It replaces the
+// stack's earlier comment, so an older plan never stands as if current.
+func renderFailed(c PlanComment) (string, error) {
+	r := c.Result
+	var reasons []string
+	for _, u := range r.Units {
+		if u.Error != "" {
+			reasons = append(reasons, u.Error)
+		}
+	}
+	body, err := execute("plan-failed.md.tmpl", struct {
+		Stack, Workspace, RunID, JobURL, Reason string
+	}{r.Target.Stack, r.Target.Workspace, c.RunID, c.JobURL, strings.Join(reasons, "; ")})
+	return StripControlLines(body), err
 }
 
 // truncate cuts plan text to budget bytes so the comment stays under the
@@ -112,12 +162,13 @@ type ApplyComment struct {
 	TerraformVersion string
 }
 
-// RenderApply renders the apply-result comment body.
+// RenderApply renders the human-readable part of the apply-result comment;
+// the adapter prepends the marker (ApplyMarker) unfiltered.
 func RenderApply(c ApplyComment) (string, error) {
 	view := struct {
 		ApplyComment
-		Marker, Icon, Status, SourceLine, Reason string
-	}{ApplyComment: c, Marker: ApplyMarker(c.Stack, c.Workspace), Reason: c.Decision.Reason}
+		Icon, Status, SourceLine, Reason string
+	}{ApplyComment: c, Reason: c.Decision.Reason}
 
 	view.Icon, view.Status = "✅", "succeeded"
 	if c.ExitCode != 0 {
@@ -125,7 +176,8 @@ func RenderApply(c ApplyComment) (string, error) {
 	}
 
 	view.SourceLine = DescribeDecision(c.Decision, 0, "", c.PlanRun).Source
-	return execute("apply.md.tmpl", view)
+	body, err := execute("apply.md.tmpl", view)
+	return StripControlLines(body), err
 }
 
 func execute(name string, data any) (string, error) {

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/aloutfi/actions/redact"
 )
 
 // server answers each request with the next of statuses (200 once they run
@@ -45,6 +47,16 @@ func newServer(t *testing.T, handle func(w http.ResponseWriter, r *http.Request)
 	srv := httptest.NewServer(s)
 	t.Cleanup(srv.Close)
 	return s, NewGitHubClient(srv.URL, "tok")
+}
+
+// text is s through the identity filter: the only way to make a redact.Text.
+func text(t *testing.T, s string) redact.Text {
+	t.Setenv("TFPR_FILTER", "")
+	out, err := redact.Configured(io.Discard, nil).Apply(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func ok(body string) func(http.ResponseWriter, *http.Request) {
@@ -127,7 +139,7 @@ func TestUpsertComment(t *testing.T) {
 		}
 	})
 	base = api.BaseURL
-	msg, err := NewGitHub(api, "o/r", "").UpsertComment("42", "<!-- m -->", "<!-- m -->\nnew")
+	msg, err := NewGitHub(api, "o/r", "").UpsertComment("42", "<!-- m -->", "", text(t, "new"))
 	if err != nil || msg != "Updated comment 6 on PR #42" {
 		t.Fatalf("got %q, %v", msg, err)
 	}
@@ -138,17 +150,18 @@ func TestUpsertComment(t *testing.T) {
 
 	// Another author: nothing of ours exists, so post.
 	s, api = newServer(t, ok(`[{"id":6,"user":{"login":"github-actions[bot]"},"body":"<!-- m -->"}]`))
-	msg, err = NewGitHub(api, "o/r", "my-app[bot]").UpsertComment("42", "<!-- m -->", "b")
+	msg, err = NewGitHub(api, "o/r", "my-app[bot]").UpsertComment("42", "<!-- m -->", "", text(t, "b"))
 	if err != nil || msg != "Posted comment on PR #42" {
 		t.Fatalf("got %q, %v", msg, err)
 	}
-	if last := s.calls[len(s.calls)-1]; last != `POST /repos/o/r/issues/42/comments {"body":"b"}` {
+	want, _ = json.Marshal(map[string]string{"body": "<!-- m -->\nb"})
+	if last := s.calls[len(s.calls)-1]; last != "POST /repos/o/r/issues/42/comments "+string(want) {
 		t.Errorf("last call: %q", last)
 	}
 
 	// A listing failure is returned, and nothing is posted.
 	s, api = newServer(t, ok(`[]`), 404)
-	if _, err := NewGitHub(api, "o/r", "").UpsertComment("42", "m", "b"); err == nil {
+	if _, err := NewGitHub(api, "o/r", "").UpsertComment("42", "m", "", text(t, "b")); err == nil {
 		t.Error("want an error when the listing fails")
 	}
 	for _, c := range s.calls {
@@ -159,7 +172,7 @@ func TestUpsertComment(t *testing.T) {
 
 	// A write failure is returned.
 	_, api = newServer(t, ok(`[]`), 200, 403)
-	if _, err := NewGitHub(api, "o/r", "").UpsertComment("42", "m", "b"); err == nil {
+	if _, err := NewGitHub(api, "o/r", "").UpsertComment("42", "m", "", text(t, "b")); err == nil {
 		t.Error("want an error when the post fails")
 	}
 }
@@ -218,5 +231,15 @@ func TestNoPR(t *testing.T) {
 	}
 	if _, err := v.BranchHead("main"); err == nil {
 		t.Error("BranchHead must fail so the guard refuses")
+	}
+}
+
+// The marker and record are tfpr's own lines, above the filtered body.
+func TestCompose(t *testing.T) {
+	if got := Compose("<!-- m -->", "<!-- r -->", text(t, "body\n")); got != "<!-- m -->\n<!-- r -->\nbody\n" {
+		t.Errorf("got %q", got)
+	}
+	if got := Compose("<!-- m -->", "", text(t, "body\n")); got != "<!-- m -->\nbody\n" {
+		t.Errorf("no record: got %q", got)
 	}
 }

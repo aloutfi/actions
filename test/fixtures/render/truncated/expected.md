@@ -1,4 +1,5 @@
 <!-- tf-plan:truncated :: default -->
+<!-- tfpr:plan@1 {"key":"truncated:default","sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:458f12ab4b9a187645281d29abf2db46c3396fdbcbf8e05e1af8ec127ada5756","run":"","attempt":0} -->
 <details open>
 <summary>📝 <b>Terraform Plan</b> — <code>truncated</code> (<code>default</code>) — 40 to add, 0 to change, 2 to destroy, 0 to replace, 0 to import</summary>
 

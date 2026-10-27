@@ -1,6 +1,8 @@
 package ci
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/aloutfi/actions/vcs"
 )
@@ -17,6 +21,10 @@ type GitHub struct {
 	env Env
 	out io.Writer
 	api *vcs.Client
+
+	mu      sync.Mutex
+	stopped int    // open Inert writers
+	token   string // the current stop-commands token
 }
 
 func newGitHub(env Env, stdout, _ io.Writer, api *vcs.Client) CI {
@@ -31,6 +39,7 @@ func (g *GitHub) Context() Ctx {
 		attempt, _ = strconv.Atoi(a)
 	}
 	return Ctx{
+		CI:      "github",
 		RunID:   e("GITHUB_RUN_ID"),
 		RunURL:  g.runURL(),
 		SHA:     e("GITHUB_SHA"),
@@ -101,9 +110,64 @@ func (g *GitHub) SetOutput(name, value string) error {
 	return appendOutput(g.env("GITHUB_OUTPUT"), name, value)
 }
 
-// Log prints a workflow command (::warning:: and so on) on stdout.
+// Log prints a workflow command (::warning:: and so on) on stdout, with the
+// message escaped as workflow-command data.
 func (g *GitHub) Log(level, msg string) {
-	fmt.Fprintf(g.out, "::%s::%s\n", level, msg)
+	fmt.Fprintf(g.out, "::%s::%s\n", level, escapeData(msg))
+}
+
+var dataEscaper = strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A")
+
+func escapeData(s string) string { return dataEscaper.Replace(s) }
+
+// Inert stops workflow-command processing (::stop-commands::<random token>)
+// until every open Inert writer is closed (::<token>::). The markers go to
+// stdout, where the runner reads commands; stop-commands applies to the whole
+// step, so nested writers share one token.
+func (g *GitHub) Inert(w io.Writer) io.WriteCloser {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.stopped == 0 {
+		var b [16]byte
+		_, _ = rand.Read(b[:])
+		g.token = hex.EncodeToString(b[:])
+		fmt.Fprintf(g.out, "::stop-commands::%s\n", g.token)
+	}
+	g.stopped++
+	return &inert{g: g, w: w, nl: true}
+}
+
+type inert struct {
+	g      *GitHub
+	w      io.Writer
+	nl     bool // the last byte written was a newline (or nothing was written)
+	closed bool
+}
+
+func (i *inert) Write(p []byte) (int, error) {
+	if len(p) > 0 {
+		i.nl = p[len(p)-1] == '\n'
+	}
+	return i.w.Write(p)
+}
+
+// Close ends the line it left open, so the resume marker starts a line of
+// its own, then resumes commands once no writer is open.
+func (i *inert) Close() error {
+	if i.closed {
+		return nil
+	}
+	i.closed = true
+	if !i.nl {
+		_, _ = io.WriteString(i.w, "\n")
+	}
+	g := i.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.stopped--; g.stopped == 0 {
+		fmt.Fprintf(g.out, "::%s::\n", g.token)
+	}
+	return nil
 }
 
 // FindPlanRun is the id of the newest successful run of workflow (a file

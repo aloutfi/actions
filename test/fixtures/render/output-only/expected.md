@@ -1,4 +1,5 @@
 <!-- tf-plan:output-only :: default -->
+<!-- tfpr:plan@1 {"key":"output-only:default","sha":"","tree":"","exit":2,"status":"outputs_only","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:f91a7080f302551ad6906f1ab7d77adc32b06acb8e83ae322f2d40375678479f","run":"","attempt":0} -->
 <details open>
 <summary>🔸 <b>Terraform Plan</b> — <code>output-only</code> (<code>default</code>) — No resource changes — 1 output change(s)</summary>
 

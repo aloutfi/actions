@@ -81,6 +81,140 @@ comment upsert finds its own comments.
 Private module sources over SSH: start an agent in an earlier step, for example
 `webfactory/ssh-agent`, or `ssh-agent` plus `ssh-add` exported via `$GITHUB_ENV`.
 
+### Redaction: `TFPR_FILTER`
+
+Set `TFPR_FILTER` (job-level `env:` for the actions) to a command that reads
+text on stdin and writes the redacted text on stdout. tfpr runs it with
+`sh -c` over:
+
+- all terraform output that tfpr echoes to the log;
+- the plan text it stores in the plan dir;
+- the resource addresses and output names it copies from `plan.json` into
+  `plan-result.json` (for_each keys can be sensitive);
+- the human-readable body of every comment it posts, and of `tfpr render`'s
+  output.
+
+The first two lines of a comment are tfpr's own and are never filtered:
+the marker that finds the comment again (`<!-- tf-plan:<stack> :: <workspace> -->`)
+and the record. They carry only the stack, the workspace, the commit and tree
+ids, unit paths, statuses and hashes. Plan text can't forge them: lines that
+look like a marker or record are removed from the body.
+
+It fails closed. A non-zero exit, empty output for non-empty input, or a
+filter that hasn't finished two minutes after its input ended fails the
+command, and nothing is posted. For terraform output, which streams through
+the filter for as long as terraform runs, the two minutes start when
+terraform exits. Filters must be
+idempotent, because the plan text is filtered once when it is stored and
+again inside the comment body. They must also keep one output line per input
+line, because names are filtered one per line. The filter does not see tfpr's
+own `TFPR_*` variables. `plan-result.json` records whether a filter ran
+(`redaction.mode`: `filter` or `none`).
+
+Resource addresses and output names come from `plan.json`, so a scrubber
+you run over `plan.txt` never sees them. They reach `plan-result.json`
+unfiltered unless `TFPR_FILTER` is set. They are filtered again in any
+comment body, but `plan-result.json` itself keeps them as they were. If
+for_each keys can be sensitive, set `TFPR_FILTER`, even when you already
+scrub `plan.txt` yourself.
+
+```sh
+# Mask anything that looks like a key or a password assignment.
+export TFPR_FILTER='sed -E -e "s/(AKIA[0-9A-Z]{16})/[redacted]/g" -e "s/(password *= *).*/\1[redacted]/"'
+```
+
+`plan.json` is never filtered or published. It holds sensitive values in
+clear text, so tfpr reads only its structure (addresses, actions, imports,
+moves, output names) and never copies a value out of it.
+
+CI command lines never reach a comment, with or without a filter. A CI
+command line is any line that starts, after optional whitespace, with
+`##vso[` (Azure Pipelines) or `::` (GitHub Actions); a scrubber's report on
+stdout or a value in the plan can produce one. tfpr removes every such line
+from filter output and plan text:
+
+- `##vso[task.logissue type=warning|error]msg`, `::warning::msg` and
+  `::error::msg` are re-emitted through tfpr's own log, escaped.
+- Every other command line is dropped, and one warning says how many.
+
+Terraform output that tfpr echoes is wrapped in `::stop-commands::` on
+GitHub, so nothing in it runs as a workflow command. `tfpr render` writes
+the body as is (redirect it to a file); command lines are already stripped
+from it.
+
+## Bring your own plan
+
+If you run terraform yourself (your own wrapper, your own scrubber, your own
+CI task with cloud credentials), give tfpr the two outputs and let it do the
+rest. The plan step and the comment step can then hold different
+credentials:
+
+```sh
+# Step 1: cloud credentials only. tfpr is not involved.
+rm -f plan.json plan.txt plan.exitcode
+code=0
+terraform -chdir=infra plan -input=false -no-color -detailed-exitcode -out=tfplan || code=$?
+echo "$code" > plan.exitcode
+[ "$code" -ne 1 ] || exit 1
+terraform -chdir=infra show -json tfplan > plan.json             # stdout only; never 2>&1
+terraform -chdir=infra show -no-color tfplan | ./scrub > plan.txt
+
+# Step 2: the repo host token only (here a GitHub token), no cloud credentials.
+# Run it even when step 1 failed, so a failed plan replaces the last good one
+# on the PR, but not when the run was cancelled: a cancelled run may have been
+# superseded by a newer, good plan. GitHub Actions: if: ${{ !cancelled() }}.
+# Azure Pipelines: condition: not(canceled()).
+export TFPR_STACK=infra TFPR_FILTER=./scrub
+failed=0
+TFPR_PLAN_JSON=plan.json TFPR_PLAN_TXT=plan.txt TFPR_EXIT_CODE="$(cat plan.exitcode 2>/dev/null)" \
+  tfpr derive || failed=1
+TFPR_GITHUB_TOKEN="$VCS_TOKEN" tfpr comment
+exit "$failed"
+```
+
+- `tfpr derive` reads `TFPR_PLAN_JSON` (`terraform show -json`) and
+  `TFPR_PLAN_TXT` (`terraform show -no-color`). It optionally reads
+  `TFPR_EXIT_CODE` (the plan's `-detailed-exitcode`) and `TFPR_PLANFILE` (the
+  binary planfile, which is hashed, not copied). It writes the plan dir and
+  sets the same step outputs as `plan`.
+- `plan.json` must be exactly one JSON document. Anything else, such as stderr
+  merged into stdout or a line-based scrubber that rewrote it, fails with a
+  clear error instead of a guess.
+- A failed plan still produces a result. `TFPR_EXIT_CODE=1`, a missing input,
+  an invalid `plan.json` or a filter failure makes `derive` write a
+  `plan-result.json` with status `error` and the reason, then exit non-zero.
+  `comment` then posts "Plan failed for `<stack>`; see <run>" over the stack's
+  comment, so the last good plan never stands as if current. If there is no
+  plan dir at all, `comment` records and posts the failure itself, then exits
+  non-zero. `tfpr plan` does the same when terraform fails, and the plan
+  action's comment step runs unless the run was cancelled (`!cancelled()`).
+  Use the same condition for your own comment step (`not(canceled())` on
+  Azure Pipelines). Never use "always", which also posts "plan failed" from
+  a cancelled run over a newer good plan.
+- If the two steps run in different jobs, run `derive` in step 1 and hand over
+  only the plan dir (below), never `plan.json`.
+- `derive` and `render` work anywhere. `comment` needs a pull request from a
+  supported CI and repo host: GitHub Actions and GitHub today, with Azure
+  DevOps in progress.
+
+### The plan dir
+
+`tfpr plan` and `tfpr derive` write the plan dir, `$TFPR_DIR` (default
+`<stack>/.tfpr`). `render` and `comment` read only this directory, so they
+need no terraform and no cloud credentials:
+
+```
+plan-result.json        what was planned: units, counts, statuses, planfile hash; no values
+units/<path>/plan.txt   each unit's plan text, already filtered (plain terraform: units/plan.txt)
+```
+
+`plan-result.json` follows [schema/plan-result.v1.json](schema/plan-result.v1.json)
+(`tfpr/plan-result@1`). Plain terraform is one unit at path `.`. The PR
+comment carries a one-line hidden record of it (`<!-- tfpr:plan@1 {...} -->`,
+right after the comment's marker line): the key, the commit and tree, the
+status, the units that still need an apply, and the planfile hash. A later
+merge-time stage reads it back from the bot's own comment.
+
 ## Inputs
 
 ### plan
@@ -165,6 +299,8 @@ of these that applies:
 ```sh
 go test ./...                # unit tests, render goldens, command scenarios
 test/run.sh                  # black-box CLI suite (builds tfpr; or set TFPR_BIN)
+                             # render fixtures: test/fixtures/render/*/{plan.json,plan.txt}
+                             # -> plan-result.json and expected.md goldens
 test/run.sh --update         # rewrite golden files
 test/fixtures/generate.sh    # regenerate plan fixtures with real terraform
 gofmt -l . && go vet ./...
@@ -172,9 +308,11 @@ shellcheck scripts/install-tfpr.sh test/run.sh test/fixtures/generate.sh
 actionlint
 ```
 
-Layout: `core/` is pure (plan stats, naming, apply policies, comment
-templates), `ci/` holds the CI platform adapters and their detection table,
-`vcs/` holds the repo-host adapters, and `cmd/tfpr` wires them together. The
+Layout: `core/` is pure (the PlanResult and its derivation, naming, apply
+policies, comment templates), `ci/` holds the CI platform adapters, `vcs/`
+holds the repo-host adapters, `redact/` runs `TFPR_FILTER`, and `cmd/tfpr`
+wires them together. A comment body is a `redact.Text`, which only the
+configured filter can produce; `vcs.UpsertComment` accepts nothing else. The
 ports are the `CI` interface in [ci/ci.go](ci/ci.go) and the `VCS` interface
 in [vcs/vcs.go](vcs/vcs.go). `test/cases/*.tsv` and the golden files under
 `test/fixtures/` are the shared behavior spec.

@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aloutfi/actions/schema/plan-result.v1.json",
+  "title": "tfpr PlanResult v1",
+  "description": "What tfpr plan or tfpr derive hands every later stage (plan-result.json in the plan dir). A run of N units; plain terraform is one unit at path \".\". It never contains attribute values. Adding fields keeps @1; renaming, removing or changing the meaning of a field bumps to @2.",
+  "type": "object",
+  "required": ["schema", "tool", "target", "source", "summary", "units", "redaction"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "tfpr/plan-result@1" },
+    "tool": {
+      "type": "object",
+      "required": ["version", "runner"],
+      "properties": {
+        "version": { "type": "string", "description": "tfpr version" },
+        "runner": { "enum": ["terraform", "terragrunt", "byo"], "description": "byo: the caller ran terraform and tfpr derive read its output" },
+        "runner_version": { "type": "string", "description": "terragrunt --version; absent for terraform" },
+        "binary": { "type": "string", "description": "basename of TFPR_TF_BIN: terraform | tofu" },
+        "binary_version": { "type": "string" },
+        "plan_format_version": { "type": "string", "description": "format_version of the plan JSON" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["stack", "workspace", "key"],
+      "properties": {
+        "stack": { "type": "string", "description": "normalized root dir: the terraform stack or the terragrunt root" },
+        "workspace": { "type": "string" },
+        "key": { "type": "string", "description": "slug(stack):workspace; one PR comment and one artifact per key" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["sha", "tree"],
+      "properties": {
+        "repo": { "type": "string" },
+        "sha": { "type": "string", "description": "commit planned; empty when the CI did not say" },
+        "tree": { "type": "string", "description": "git rev-parse <sha>^{tree}; empty when unknown" },
+        "ref": { "type": "string" },
+        "pr": { "type": ["string", "null"] }
+      }
+    },
+    "run": {
+      "type": "object",
+      "properties": {
+        "ci": { "type": "string" },
+        "id": { "type": "string" },
+        "attempt": { "type": "integer", "minimum": 0, "description": "0 = the CI has no attempt counter" },
+        "url": { "type": "string" },
+        "job_url": { "type": "string" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["exit_code", "status", "counts", "units"],
+      "properties": {
+        "exit_code": { "enum": [0, 1, 2], "description": "computed from units: 1 if any unit is error or not_run, else 2 if any is not no_op, else 0" },
+        "status": { "$ref": "#/$defs/status" },
+        "counts": { "$ref": "#/$defs/counts" },
+        "units": {
+          "type": "object",
+          "required": ["total", "changed", "error", "not_run", "provisional", "apply_needed"],
+          "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "changed": { "type": "integer", "minimum": 0 },
+            "error": { "type": "integer", "minimum": 0 },
+            "not_run": { "type": "integer", "minimum": 0 },
+            "provisional": { "type": "integer", "minimum": 0 },
+            "apply_needed": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "units": { "type": "array", "items": { "$ref": "#/$defs/unit" }, "description": "sorted by path" },
+    "planset": {
+      "type": "object",
+      "required": ["sha256"],
+      "properties": {
+        "sha256": { "type": "string", "description": "hex sha256 over the sorted lines \"<path> <planfile sha256>\\n\" of every unit with a planfile; absent when no unit has one" }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["none", "filter", "byo"], "description": "filter: TFPR_FILTER ran over the plan text and over the resource addresses and output names copied from plan.json. none: no filter ran, so those names are as plan.json had them (a caller's own scrubber over plan.txt does not cover them). byo is reserved for a caller that hands tfpr names it has already filtered; tfpr does not write it today" }
+      }
+    },
+    "render": {
+      "type": "object",
+      "description": "written by render; absent before it",
+      "properties": {
+        "host": { "type": "string" },
+        "budget": { "type": "integer" },
+        "truncated": { "type": "boolean" },
+        "units_truncated": { "type": "integer" },
+        "text_shown_chars": { "type": "integer" },
+        "resources_shown": { "type": "integer" },
+        "resources_total": { "type": "integer" }
+      }
+    },
+    "links": {
+      "type": "object",
+      "properties": {
+        "job": { "type": "string" },
+        "full_plan": { "type": "string" },
+        "summary": { "type": "string" },
+        "comment": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "status": {
+      "enum": ["no_op", "changes", "state_only", "outputs_only", "error", "not_run", "excluded"],
+      "description": "error: exit 1. changes: any create/update/delete/replace, or exit 2 with nothing tfpr can count. state_only: only import/forget/move. outputs_only: only output changes. no_op: nothing to apply. not_run: skipped because an upstream unit failed. excluded: removed by an exclude block"
+    },
+    "counts": {
+      "type": "object",
+      "required": ["create", "update", "delete", "replace", "import", "forget", "move", "read", "output"],
+      "additionalProperties": { "type": "integer", "minimum": 0 },
+      "properties": {
+        "create": { "type": "integer", "minimum": 0 },
+        "update": { "type": "integer", "minimum": 0 },
+        "delete": { "type": "integer", "minimum": 0 },
+        "replace": { "type": "integer", "minimum": 0 },
+        "import": { "type": "integer", "minimum": 0 },
+        "forget": { "type": "integer", "minimum": 0 },
+        "move": { "type": "integer", "minimum": 0 },
+        "read": { "type": "integer", "minimum": 0 },
+        "output": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "unit": {
+      "type": "object",
+      "required": ["path", "status", "counts"],
+      "properties": {
+        "path": { "type": "string", "description": "relative to target.stack, as the runner names it; \".\" for plain terraform" },
+        "exit_code": { "enum": [0, 1, 2, null], "description": "the unit's -detailed-exitcode; null when the caller did not say" },
+        "status": { "$ref": "#/$defs/status" },
+        "counts": { "$ref": "#/$defs/counts" },
+        "resources": {
+          "type": "array",
+          "description": "resource changes in plan.json order, no-ops omitted; names pass through TFPR_FILTER when one is configured",
+          "items": {
+            "type": "object",
+            "required": ["address", "action"],
+            "properties": {
+              "address": { "type": "string" },
+              "previous_address": { "type": "string" },
+              "action": { "enum": ["create", "update", "delete", "replace", "forget", "read", "move", "import"] },
+              "importing": { "type": "boolean" },
+              "moved": { "type": "boolean" },
+              "forget": { "type": "boolean", "description": "the old object is forgotten, not destroyed: actions [forget, create], counted as a create and a forget" },
+              "reason": { "type": "string", "description": "terraform action_reason, e.g. replace_because_tainted" },
+              "mode": { "enum": ["managed", "data"] }
+            }
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "description": "changed root outputs, sorted by name, without values",
+          "items": {
+            "type": "object",
+            "required": ["name", "action"],
+            "properties": {
+              "name": { "type": "string" },
+              "action": { "type": "string" },
+              "sensitive": { "type": "boolean" }
+            }
+          }
+        },
+        "drift": { "type": "integer", "minimum": 0, "description": "len(resource_drift); shown, never counted as a change" },
+        "text_chars": { "type": ["integer", "null"], "description": "characters in the filtered plan text; null when the runner could not attribute text to this unit" },
+        "fingerprint": { "type": "string", "description": "sha256:<hex> of the unit's filtered plan text" },
+        "planfile": {
+          "type": "object",
+          "required": ["present"],
+          "properties": {
+            "present": { "type": "boolean" },
+            "sha256": { "type": "string", "description": "hex sha256 of the binary planfile" }
+          }
+        },
+        "dependencies": { "type": "array", "items": { "type": "string" }, "description": "direct upstream units as root-relative paths; [] for terraform" },
+        "state_empty": { "type": "boolean", "description": "the plan's prior state has no resources" },
+        "provisional": { "type": "boolean", "description": "the plan depends on upstream state this run may change" },
+        "provisional_reason": { "type": "string" },
+        "skippable": { "type": "boolean", "description": "status is no_op and the unit is not provisional" },
+        "error": { "type": "string", "description": "why a unit with status error has no plan (the plan failed, or its output was missing or invalid)" },
+        "runner_result": {
+          "type": "object",
+          "description": "terragrunt run-report row, verbatim",
+          "properties": {
+            "result": { "type": "string" },
+            "reason": { "type": "string" },
+            "cause": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

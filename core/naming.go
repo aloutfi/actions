@@ -10,8 +10,12 @@ import (
 // ArtifactName is the planfile artifact name for a stack and workspace:
 // tfplan-<slug>-<workspace>. Plan (upload) and apply (download) must agree.
 func ArtifactName(stack, workspace string) string {
-	// Slug: / and . become -, anything else that is not [A-Za-z0-9-] is
-	// dropped, dash runs collapse, and the ends are trimmed.
+	return "tfplan-" + slug(stack) + "-" + orDefault(workspace)
+}
+
+// slug turns a stack path into a name: / and . become -, anything else that
+// is not [A-Za-z0-9-] is dropped, dash runs collapse, and the ends are trimmed.
+func slug(stack string) string {
 	var b strings.Builder
 	for _, c := range []byte(stack) {
 		switch {
@@ -25,8 +29,7 @@ func ArtifactName(stack, workspace string) string {
 		}
 		b.WriteByte(c)
 	}
-	slug := strings.TrimPrefix(strings.TrimSuffix(b.String(), "-"), "-")
-	return "tfplan-" + slug + "-" + orDefault(workspace)
+	return strings.TrimPrefix(strings.TrimSuffix(b.String(), "-"), "-")
 }
 
 // CleanStack is the one spelling of a stack path that tfpr uses everywhere
