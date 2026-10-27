@@ -245,8 +245,13 @@ jobs:
 For each stack, `comment`:
 
 - uploads the full, filtered plan as the run's summary;
-- sets the output variable `has_changes`;
+- sets the output variables `drift_check` (`complete` or `incomplete`) and
+  `has_changes`;
 - on drift, logs a warning naming the stack and tags the run `drift`.
+
+A plan that failed or didn't run makes the check `incomplete`, which is not
+drift: a warning, no tag, and `has_changes` empty. With
+`TFPR_FAIL_ON_DRIFT=true` the step fails with that reason.
 
 With `TFPR_FAIL_ON_DRIFT=true`, a drifted stack ends its step
 **SucceededWithIssues**. `has_changes` is per stack. To act on any drift, use

@@ -287,7 +287,9 @@ merge-time stage reads it back from the bot's own comment.
 
 Outputs: `exit_code`, `has_changes`, `has_imports`, `has_output_changes`,
 `summary`, `plan_artifact_name`, `plan_text_url`, and in drift mode `drifted`
-(`true` when the plan would change anything). For several stacks, run one
+(`true` when the plan would change anything) and `drift_check`. A plan that
+failed or didn't run makes the check `incomplete`, which is not drift:
+`drifted` is empty, and `fail_on_drift` fails the job with that reason. For several stacks, run one
 job per stack (a matrix) and combine their `drifted` outputs.
 
 The comment step runs on every run that was not cancelled. Outside a pull

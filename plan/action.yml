@@ -85,8 +85,11 @@ outputs:
     description: Artifact name for the planfile (uploaded when output_planfile=true)
     value: ${{ steps.plan.outputs.plan_artifact_name }}
   drifted:
-    description: "Drift mode: 'true' when the plan would change anything"
+    description: "Drift mode: 'true' when the plan would change anything; empty when the check was incomplete"
     value: ${{ steps.comment.outputs.has_changes }}
+  drift_check:
+    description: "Drift mode: 'complete', or 'incomplete' when the plan failed or didn't run (not drift)"
+    value: ${{ steps.comment.outputs.drift_check }}
   plan_text_url:
     description: Download URL of the plan.txt artifact (upload_plan_text=true)
     value: ${{ steps.plan-text-upload.outputs.artifact-url }}
