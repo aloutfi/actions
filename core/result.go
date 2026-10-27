@@ -409,10 +409,10 @@ func Summarize(units []Unit) Summary {
 	s := Summary{Status: StatusNoOp}
 	s.Units.Total = len(units)
 	for _, u := range units {
-		s.Counts.plus(u.Counts)
 		if u.Status == StatusExcluded {
-			continue
+			continue // removed from the run: nothing of it counts
 		}
+		s.Counts.plus(u.Counts)
 		if severity[u.Status] > severity[s.Status] {
 			s.Status = u.Status
 		}

@@ -133,7 +133,7 @@ func TestSummarize(t *testing.T) {
 		{Path: "a", Status: StatusNoOp, Skippable: true},
 		{Path: "b", Status: StatusChanges, Counts: Counts{Create: 2}},
 		{Path: "c", Status: StatusOutputsOnly, Counts: Counts{Output: 1}, Provisional: true},
-		{Path: "d", Status: StatusExcluded},
+		{Path: "d", Status: StatusExcluded, Counts: Counts{Create: 5, Delete: 1}},
 	}
 	s := Summarize(units)
 	want := Summary{ExitCode: 2, Status: StatusChanges, Counts: Counts{Create: 2, Output: 1},
