@@ -1,0 +1,172 @@
+### ⚠️ Terraform plan · `truncated` (`default`) · 40 to add, 0 to change, 2 to destroy
+> **Plan text truncated**: showing 3,182 of 8,766 characters. The resource list below is complete.
+> Full plan: [job summary](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · [job log](https://ci.example/run/1234/job/5678)
+> Redaction: no redaction filter configured
+
+| Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 40 | 0 | 2 | 0 | 0 | 0 | 0 | 1 | 0 |
+
+**Resources (42)**
+```text
+-   terraform_data.item["alpha"]   delete
+-   terraform_data.item["beta"]    delete
++   terraform_data.item["item01"]  create
++   terraform_data.item["item02"]  create
++   terraform_data.item["item03"]  create
++   terraform_data.item["item04"]  create
++   terraform_data.item["item05"]  create
++   terraform_data.item["item06"]  create
++   terraform_data.item["item07"]  create
++   terraform_data.item["item08"]  create
++   terraform_data.item["item09"]  create
++   terraform_data.item["item10"]  create
++   terraform_data.item["item11"]  create
++   terraform_data.item["item12"]  create
++   terraform_data.item["item13"]  create
++   terraform_data.item["item14"]  create
++   terraform_data.item["item15"]  create
++   terraform_data.item["item16"]  create
++   terraform_data.item["item17"]  create
++   terraform_data.item["item18"]  create
++   terraform_data.item["item19"]  create
++   terraform_data.item["item20"]  create
++   terraform_data.item["item21"]  create
++   terraform_data.item["item22"]  create
++   terraform_data.item["item23"]  create
++   terraform_data.item["item24"]  create
++   terraform_data.item["item25"]  create
++   terraform_data.item["item26"]  create
++   terraform_data.item["item27"]  create
++   terraform_data.item["item28"]  create
++   terraform_data.item["item29"]  create
++   terraform_data.item["item30"]  create
++   terraform_data.item["item31"]  create
++   terraform_data.item["item32"]  create
++   terraform_data.item["item33"]  create
++   terraform_data.item["item34"]  create
++   terraform_data.item["item35"]  create
++   terraform_data.item["item36"]  create
++   terraform_data.item["item37"]  create
++   terraform_data.item["item38"]  create
++   terraform_data.item["item39"]  create
++   terraform_data.item["item40"]  create
+```
+
+#### Plan output for truncated (truncated: 3,182 of 8,766 characters)
+
+```terraform
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+  - destroy
+
+Terraform will perform the following actions:
+
+  # terraform_data.item["alpha"] will be destroyed
+  # (because key ["alpha"] is not in for_each map)
+  - resource "terraform_data" "item" {
+      - id     = "efc3b390-f174-9156-bb86-a1a7cef5dc52" -> null
+      - input  = "one" -> null
+      - output = "one" -> null
+    }
+
+  # terraform_data.item["beta"] will be destroyed
+  # (because key ["beta"] is not in for_each map)
+  - resource "terraform_data" "item" {
+      - id     = "67316145-e488-8477-2a78-e6bb5aebb391" -> null
+      - input  = "two" -> null
+      - output = "two" -> null
+    }
+
+  # terraform_data.item["item01"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-01"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item02"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-02"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item03"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-03"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item04"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-04"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item05"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-05"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item06"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-06"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item07"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-07"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item08"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-08"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item09"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-09"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item10"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-10"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item11"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-11"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item12"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-12"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item13"] will be created
+```
+
+Outputs: `item_count` (update)
+
+[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · tfpr dev · redaction: none

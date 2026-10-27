@@ -90,6 +90,9 @@ func TestHostFor(t *testing.T) {
 	if h := HostFor("github"); h.MaxComment != 65536 || h.MaxSummary != 1<<20 || !h.Details || !h.DiffFence {
 		t.Errorf("github: %+v", h)
 	}
+	if h := HostFor("azure"); h.MaxComment != 140000 || h.MaxSummary != 512<<10 || h.Details || h.DiffFence || h.HiddenHTML {
+		t.Errorf("azure: %+v", h)
+	}
 	if HostFor("nonesuch") != HostFor("github") {
 		t.Errorf("unknown hosts get the default row")
 	}

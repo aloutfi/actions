@@ -460,7 +460,13 @@ func (a *app) render() error {
 	if err != nil {
 		return err
 	}
-	_, err = io.WriteString(a.stdout, vcs.Compose(marker, record, body))
+	// Hosts that hide HTML comments carry the marker and record in the text;
+	// the others (Azure Repos) keep them in thread properties.
+	out := body.String()
+	if a.commentHost().HiddenHTML {
+		out = vcs.Compose(marker, record, body)
+	}
+	_, err = io.WriteString(a.stdout, out)
 	return err
 }
 

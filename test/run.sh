@@ -95,6 +95,35 @@ for dir in */; do
   assert_golden "summary ${name}" "render/${name}/summary.md${gz}" "${sandbox}/summary.md"
 done
 
+# The Azure Repos dialect (TFPR_VCS=azure) on the fixtures that stress the
+# layout: headings instead of <details>, plain fences, no hidden markup (the
+# marker and record are thread properties), the banner still right under the
+# headline, and within Azure's limit.
+for name in truncated large; do
+  stack="${name}" budget="" plan_json="${name}/plan.json" plan_txt="${name}/plan.txt"
+  [[ -f "${name}/budget" ]] && budget="$(cat "${name}/budget")"
+  if [[ -f "${name}/plan.json.gz" ]]; then
+    plan_json="${sandbox}/plan.json" plan_txt="${sandbox}/plan.txt"
+    gunzip -c "${name}/plan.json.gz" > "${plan_json}"
+    gunzip -c "${name}/plan.txt.gz" > "${plan_txt}"
+  fi
+  rm -rf "${sandbox}/plandir"
+  env -i PATH="${PATH}" TFPR_STACK="${stack}" TFPR_WORKSPACE=default TFPR_DIR="${sandbox}/plandir" \
+    TFPR_PLAN_JSON="${plan_json}" TFPR_PLAN_TXT="${plan_txt}" TFPR_EXIT_CODE="$(cat "${name}/exit_code")" \
+    "${tfpr}" derive > /dev/null 2>&1 || fail "derive ${name} (azure)"
+  env -i PATH="${PATH}" TFPR_DIR="${sandbox}/plandir" TFPR_VCS=azure "${links[@]}" TFPR_COMMENT_BUDGET="${budget}" \
+    "${tfpr}" render > "${sandbox}/render.md"
+  assert_golden "render ${name} (azure)" "render/${name}/expected-azure.md" "${sandbox}/render.md"
+  out="$(cat "${sandbox}/render.md")"
+  assert_lacks "${name} (azure): no <details>" "${out}" "<details"
+  assert_lacks "${name} (azure): no diff fence" "${out}" '```diff'
+  assert_lacks "${name} (azure): no hidden markup" "${out}" "<!--"
+  if head -n 3 "${sandbox}/render.md" | grep -q '^> \*\*'; then pass; else
+    fail "${name} (azure): the banner is not right under the headline"; fi
+  chars="$(LC_ALL=en_US.UTF-8 wc -m < "${sandbox}/render.md" | tr -d ' ')"
+  if [[ "${chars}" -le 140000 ]]; then pass; else fail "${name} (azure): ${chars} characters, over 140,000"; fi
+done
+
 # The truncated and large fixtures must be cut, and say so up front: the
 # banner is within the comment's first five lines, every delete is listed,
 # and the whole comment fits GitHub's limit.
