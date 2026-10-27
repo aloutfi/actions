@@ -44,10 +44,12 @@ jobs:
           CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/tfpr" ./cmd/tfpr
           TFPR_BIN="${RUNNER_TEMP}/tfpr" test/run.sh
 
-  # Dogfood: plan the fixture stack with the local action so every PR gets a
-  # real plan comment. No release covers this ref, so the action builds tfpr
-  # from source, exercising the unreleased-ref install path. Fork PRs get a
-  # read-only token, so skip them.
+  # Dogfood: plan the fixture stacks with the local action so every PR gets
+  # real plan comments: a small one, and a 3,000-resource one that shows the
+  # truncation banner, the shortened resource list and the full-plan links.
+  # No release covers this ref, so the action builds tfpr from source,
+  # exercising the unreleased-ref install path. Fork PRs get a read-only
+  # token, so skip them.
   dogfood:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -55,13 +57,22 @@ jobs:
       contents: read
       pull-requests: write # plan comment
       actions: read # job-log link in the comment
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - stack: test/fixtures/stack
+            bulk: ""
+          - stack: test/fixtures/stack-large
+            bulk: "3000"
     env:
       # Exercised end to end: the comment shows this for_each key redacted.
       TFPR_FILTER: sed -e 's/"alpha"/"[redacted]"/g'
+      TF_VAR_bulk: ${{ matrix.bulk }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: ./plan
         with:
-          stack: test/fixtures/stack
+          stack: ${{ matrix.stack }}
           terraform_version: "1.16.5"
           output_planfile: "true"
