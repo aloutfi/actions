@@ -47,6 +47,41 @@ func DecidePlanSource(usePlanfile bool, attempt int, hasPlanfile, allowFallback 
 	}
 }
 
+// DecisionText is how a plan-source decision reads: the line apply logs when
+// it decides (at Level: "warning", "error", or "" for plain output; no line
+// when Log is empty) and the apply-result comment's Source line.
+type DecisionText struct {
+	Level, Log, Source string
+}
+
+// DescribeDecision is the one table of decision texts. attempt, artifact
+// (the planfile artifact name) and planRun (the run that made the planfile,
+// "" for the current run) fill in the details.
+func DescribeDecision(d Decision, attempt int, artifact, planRun string) DecisionText {
+	if planRun == "" {
+		planRun = "current"
+	}
+	switch d {
+	case Decision{SourcePlanfile, ""}:
+		return DecisionText{"", "Found planfile from artifact; will apply it",
+			"planfile from PR review (run #" + planRun + ")"}
+	case Decision{SourceFresh, "rerun"}:
+		return DecisionText{"warning", fmt.Sprintf("Re-run detected (attempt=%d); skipping stored planfile to avoid stale-plan apply", attempt),
+			"fresh plan (rerun bypass)"}
+	case Decision{SourceFresh, "missing-artifact"}:
+		return DecisionText{"warning", "Planfile artifact requested but not found; falling back to fresh-plan apply (allow_fresh_plan_fallback=true)",
+			"fresh plan (artifact missing)"}
+	case Decision{SourceNone, "missing-artifact"}:
+		return DecisionText{"error", fmt.Sprintf("Planfile artifact '%s' not found; refusing to apply a fresh, unreviewed plan. It may have expired (the plan action's retention_days input sets how long it is kept) or the plan run did not upload it. Re-run the plan, or set allow_fresh_plan_fallback=true to apply a fresh plan instead.", artifact),
+			"none (planfile artifact missing; fresh-plan fallback not allowed)"}
+	case Decision{SourceNone, "superseded"}: // the guard logs its own reason
+		return DecisionText{Source: "none (superseded tree refused)"}
+	case Decision{SourceNone, "unverified-ref"}:
+		return DecisionText{Source: "none (could not verify the branch head)"}
+	}
+	return DecisionText{Source: "fresh plan"}
+}
+
 // Guard outcomes.
 const (
 	GuardOK         = 0 // the fresh apply may run

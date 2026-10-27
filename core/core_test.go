@@ -135,6 +135,27 @@ func TestDiffSummary(t *testing.T) {
 	}
 }
 
+func TestDescribeDecision(t *testing.T) {
+	for _, c := range []struct {
+		d          Decision
+		level, log string
+		source     string
+	}{
+		{Decision{SourcePlanfile, ""}, "", "Found planfile", "planfile from PR review (run #77)"},
+		{Decision{SourceFresh, "no-artifact-requested"}, "", "", "fresh plan"},
+		{Decision{SourceFresh, "rerun"}, "warning", "Re-run detected (attempt=2)", "fresh plan (rerun bypass)"},
+		{Decision{SourceFresh, "missing-artifact"}, "warning", "falling back", "fresh plan (artifact missing)"},
+		{Decision{SourceNone, "missing-artifact"}, "error", "Planfile artifact 'tfplan-x-default' not found", "none (planfile artifact missing; fresh-plan fallback not allowed)"},
+		{Decision{SourceNone, "superseded"}, "", "", "none (superseded tree refused)"},
+		{Decision{SourceNone, "unverified-ref"}, "", "", "none (could not verify the branch head)"},
+	} {
+		got := DescribeDecision(c.d, 2, "tfplan-x-default", "77")
+		if got.Level != c.level || got.Source != c.source || !strings.Contains(got.Log, c.log) || (c.log == "") != (got.Log == "") {
+			t.Errorf("%+v: got %+v", c.d, got)
+		}
+	}
+}
+
 func TestSupersededGuard(t *testing.T) {
 	heads := func(head string, err error) func(string) (string, error) {
 		return func(branch string) (string, error) {

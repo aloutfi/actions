@@ -392,17 +392,12 @@ func (a *app) apply() error {
 	attempt := a.ctx.Attempt
 
 	d := core.DecidePlanSource(usePlanfile, attempt, a.reviewedPlanfile(), allow)
+	if t := core.DescribeDecision(d, attempt, core.ArtifactName(a.stack, a.workspace), ""); t.Log != "" {
+		a.log(t.Level, t.Log)
+	}
 	code := 0
-	switch d {
-	case core.Decision{Source: core.SourceFresh, Reason: "rerun"}:
-		a.ci.Log(ci.Warning, fmt.Sprintf("Re-run detected (attempt=%d); skipping stored planfile to avoid stale-plan apply", attempt))
-	case core.Decision{Source: core.SourceFresh, Reason: "missing-artifact"}:
-		a.ci.Log(ci.Warning, "Planfile artifact requested but not found; falling back to fresh-plan apply (allow_fresh_plan_fallback=true)")
-	case core.Decision{Source: core.SourceNone, Reason: "missing-artifact"}:
-		a.ci.Log(ci.Error, fmt.Sprintf("Planfile artifact '%s' not found; refusing to apply a fresh, unreviewed plan. It may have expired (the plan action's retention_days input sets how long it is kept) or the plan run did not upload it. Re-run the plan, or set allow_fresh_plan_fallback=true to apply a fresh plan instead.", core.ArtifactName(a.stack, a.workspace)))
+	if d.Source == core.SourceNone {
 		code = 1
-	case core.Decision{Source: core.SourcePlanfile}:
-		fmt.Fprintln(a.stdout, "Found planfile from artifact; will apply it")
 	}
 
 	if d.Source == core.SourceFresh {

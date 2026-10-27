@@ -124,26 +124,7 @@ func RenderApply(c ApplyComment) (string, error) {
 		view.Icon, view.Status = "❌", "failed (exit "+strconv.Itoa(c.ExitCode)+")"
 	}
 
-	run := c.PlanRun
-	if run == "" {
-		run = "current"
-	}
-	switch d := c.Decision; {
-	case d.Source == SourcePlanfile:
-		view.SourceLine = "planfile from PR review (run #" + run + ")"
-	case d == Decision{SourceFresh, "rerun"}:
-		view.SourceLine = "fresh plan (rerun bypass)"
-	case d == Decision{SourceFresh, "missing-artifact"}:
-		view.SourceLine = "fresh plan (artifact missing)"
-	case d == Decision{SourceNone, "missing-artifact"}:
-		view.SourceLine = "none (planfile artifact missing; fresh-plan fallback not allowed)"
-	case d == Decision{SourceNone, "superseded"}:
-		view.SourceLine = "none (superseded tree refused)"
-	case d == Decision{SourceNone, "unverified-ref"}:
-		view.SourceLine = "none (could not verify the branch head)"
-	default:
-		view.SourceLine = "fresh plan"
-	}
+	view.SourceLine = DescribeDecision(c.Decision, 0, "", c.PlanRun).Source
 	return execute("apply.md.tmpl", view)
 }
 
