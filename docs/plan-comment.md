@@ -55,8 +55,9 @@ The headline phrase follows the plan's status:
 ## Staying under the limit
 
 GitHub rejects comments over 65,536 characters. tfpr fits the whole comment
-(the hidden marker and record lines included) into that limit, or into
-`TFPR_COMMENT_BUDGET` characters when you set it:
+(the hidden marker and record lines included) into that limit.
+`TFPR_COMMENT_BUDGET` sets a smaller limit, in characters of the whole
+comment; a value above the host's limit is lowered to it. Within the limit:
 
 - The resource list gets at most 30% of the budget. Delete, replace and
   forget lines are never shortened: they are listed in full whenever they

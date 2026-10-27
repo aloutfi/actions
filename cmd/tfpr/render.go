@@ -20,8 +20,9 @@ func commentHost() core.Host { return core.HostFor(envOr("TFPR_VCS", "github")) 
 // name must not break the upsert match or the record.
 //
 // The whole comment (marker, record and body) fits the host's limit, or
-// TFPR_COMMENT_BUDGET characters when that is set. If the filter lengthens
-// the body past it, the minimal layout is posted instead.
+// TFPR_COMMENT_BUDGET characters when that is set and smaller: the host
+// rejects longer comments. If the filter lengthens the body past it, the
+// minimal layout is posted instead.
 func (a *app) renderPlan(r core.PlanResult, texts map[string]string, links core.Links) (body redact.Text, marker, record string, err error) {
 	host := commentHost()
 	limit := host.MaxComment
@@ -29,6 +30,7 @@ func (a *app) renderPlan(r core.PlanResult, texts map[string]string, links core.
 		if limit, err = strconv.Atoi(b); err != nil || limit <= 0 {
 			return body, "", "", fmt.Errorf("TFPR_COMMENT_BUDGET must be a number of characters, got '%s'", b)
 		}
+		limit = min(limit, host.MaxComment)
 	}
 	tmpl, err := userTemplate()
 	if err != nil {

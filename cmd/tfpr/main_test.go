@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -181,13 +182,32 @@ func (s *scenario) byo(fixture string) result {
 	dir := filepath.Join(root, "test", "fixtures", "render", fixture)
 	exit, err := os.ReadFile(filepath.Join(dir, "exit_code"))
 	must(s.t, err)
-	s.set("TFPR_PLAN_JSON", filepath.Join(dir, "plan.json"), "TFPR_PLAN_TXT", filepath.Join(dir, "plan.txt"),
+	s.set("TFPR_PLAN_JSON", s.fixtureFile(dir, "plan.json"), "TFPR_PLAN_TXT", s.fixtureFile(dir, "plan.txt"),
 		"TFPR_EXIT_CODE", strings.TrimSpace(string(exit)))
 	r := s.run("derive")
 	if r.rc != 0 {
 		s.t.Fatalf("derive failed:\n%s", r.out)
 	}
 	return r
+}
+
+// fixtureFile is the path of a fixture file; a gzipped one (large
+// fixtures) is unzipped into the workspace first.
+func (s *scenario) fixtureFile(dir, name string) string {
+	path := filepath.Join(dir, name)
+	f, err := os.Open(path + ".gz")
+	if os.IsNotExist(err) {
+		return path
+	}
+	must(s.t, err)
+	defer f.Close()
+	z, err := gzip.NewReader(f)
+	must(s.t, err)
+	data, err := io.ReadAll(z)
+	must(s.t, err)
+	out := filepath.Join(s.ws, "fixture-"+name)
+	must(s.t, os.WriteFile(out, data, 0o644))
+	return out
 }
 
 // planResult reads the plan dir's plan-result.json.
@@ -1066,4 +1086,16 @@ func TestTemplateOverride(t *testing.T) {
 	r = s.set("TFPR_TEMPLATE", "missing.tmpl").run("render")
 	eq(t, "missing template: exit code", 1, r.rc)
 	has(t, "missing template: says so", r.out, "TFPR_TEMPLATE: open missing.tmpl")
+}
+
+// TFPR_COMMENT_BUDGET can lower the comment's size, never raise it past the
+// host's limit: GitHub rejects longer comments.
+func TestCommentBudgetIsClampedToTheHost(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_COMMENT_BUDGET", "200000")
+	s.byo("large")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	if n := utf8.RuneCountInString(r.body); n > 65536 {
+		t.Errorf("comment is %d characters, over GitHub's 65,536", n)
+	}
 }
