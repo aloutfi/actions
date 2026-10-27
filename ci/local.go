@@ -3,7 +3,9 @@ package ci
 import (
 	"fmt"
 	"io"
+	"os"
 
+	"github.com/aloutfi/actions/redact"
 	"github.com/aloutfi/actions/vcs"
 )
 
@@ -42,6 +44,16 @@ func (l *Local) Inert(w io.Writer) io.WriteCloser { return nopCloser{w} }
 type nopCloser struct{ io.Writer }
 
 func (nopCloser) Close() error { return nil }
+
+// UploadSummary writes markdown to $TFPR_SUMMARY_FILE, if set; a local run
+// has no summary page otherwise.
+func (l *Local) UploadSummary(markdown redact.Text) error {
+	path := l.env("TFPR_SUMMARY_FILE")
+	if path == "" {
+		return nil
+	}
+	return os.WriteFile(path, []byte(markdown.String()), 0o644)
+}
 
 // Log prints "<level>: msg" on stderr.
 func (l *Local) Log(level, msg string) {

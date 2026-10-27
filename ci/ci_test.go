@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aloutfi/actions/redact"
 	"github.com/aloutfi/actions/vcs"
 )
 
@@ -81,10 +82,51 @@ func TestGitHubJobURL(t *testing.T) {
 	if got := g.JobURL(); got != "https://gh.example/o/r/actions/runs/9/job/8" {
 		t.Errorf("got %s", got)
 	}
+	if got := g.SummaryURL(); got != "https://gh.example/o/r/actions/runs/9#summary-8" {
+		t.Errorf("summary: got %s", got)
+	}
 	env["RUNNER_NAME"] = ""
+	if got := g.JobURL(); got != "https://gh.example/o/r/actions/runs/9/job/8" {
+		t.Errorf("the job URL is looked up once: got %s", got)
+	}
+	g = &GitHub{env: envOf(env), api: vcs.NewGitHubClient(srv.URL, "")}
 	if got := g.JobURL(); got != "https://gh.example/o/r/actions/runs/9" {
 		t.Errorf("no matching runner: got %s", got)
 	}
+	if got := g.SummaryURL(); got != "https://gh.example/o/r/actions/runs/9" {
+		t.Errorf("summary, no job id: got %s", got)
+	}
+}
+
+// The job summary only takes filtered text, and appends: other steps may
+// have written to the same file.
+func TestUploadSummary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "summary")
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.WriteFile(path, []byte("earlier\n"), 0o644))
+	text, err := redact.Configured(io.Discard, nil).Apply("### plan\n")
+	must(err)
+	must(newGitHub(envOf(map[string]string{"GITHUB_STEP_SUMMARY": path}), io.Discard, io.Discard, nil).UploadSummary(text))
+	data, _ := os.ReadFile(path)
+	if string(data) != "earlier\n### plan\n" {
+		t.Errorf("github: %q", data)
+	}
+	if newGitHub(envOf(nil), io.Discard, io.Discard, nil).UploadSummary(text) == nil {
+		t.Errorf("github without GITHUB_STEP_SUMMARY: no error")
+	}
+
+	local := filepath.Join(t.TempDir(), "tfpr-summary.md")
+	must(newLocal(envOf(map[string]string{"TFPR_SUMMARY_FILE": local}), io.Discard, io.Discard, nil).UploadSummary(text))
+	data, _ = os.ReadFile(local)
+	if string(data) != "### plan\n" {
+		t.Errorf("local: %q", data)
+	}
+	must(newLocal(envOf(nil), io.Discard, io.Discard, nil).UploadSummary(text))
 }
 
 func TestGitHubOutputsAndLogs(t *testing.T) {

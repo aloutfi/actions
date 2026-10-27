@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aloutfi/actions/redact"
 	"github.com/aloutfi/actions/vcs"
 )
 
@@ -25,6 +27,9 @@ type GitHub struct {
 	mu      sync.Mutex
 	stopped int    // open Inert writers
 	token   string // the current stop-commands token
+
+	jobOnce sync.Once
+	jobURL  string
 }
 
 func newGitHub(env Env, stdout, _ io.Writer, api *vcs.Client) CI {
@@ -78,8 +83,13 @@ func (g *GitHub) pr() string {
 // JobURL links to this job's logs. The Actions context has no job id but the
 // API does: match on runner_name, which is unique while the job is in
 // progress and also tells matrix cells apart. Any failure falls back to the
-// run URL.
+// run URL. The lookup runs once.
 func (g *GitHub) JobURL() string {
+	g.jobOnce.Do(func() { g.jobURL = g.findJobURL() })
+	return g.jobURL
+}
+
+func (g *GitHub) findJobURL() string {
 	runURL := g.runURL()
 	runner := g.env("RUNNER_NAME")
 	var id int64
@@ -103,6 +113,34 @@ func (g *GitHub) JobURL() string {
 		return runURL
 	}
 	return runURL + "/job/" + strconv.FormatInt(id, 10)
+}
+
+// UploadSummary appends markdown to $GITHUB_STEP_SUMMARY, which GitHub
+// shows on the run page (1 MiB per step).
+func (g *GitHub) UploadSummary(markdown redact.Text) error {
+	path := g.env("GITHUB_STEP_SUMMARY")
+	if path == "" {
+		return errors.New("GITHUB_STEP_SUMMARY is not set")
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(f, markdown.String()); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// SummaryURL links to this job's summary on the run page
+// (#summary-<job id>), or to the run page when the job id is unknown.
+func (g *GitHub) SummaryURL() string {
+	runURL := g.runURL()
+	if id, ok := strings.CutPrefix(g.JobURL(), runURL+"/job/"); ok {
+		return runURL + "#summary-" + id
+	}
+	return runURL
 }
 
 // SetOutput appends name=value to $GITHUB_OUTPUT.
