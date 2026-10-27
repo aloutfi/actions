@@ -14,6 +14,13 @@ Azure DevOps support is in progress.
 
 ## Usage
 
+Pin the actions to a release tag (`@vX.Y.Z`) or to that tag's commit SHA.
+A release ref downloads a prebuilt `tfpr` that is checked against the
+checksums committed at that ref. Any other ref, such as `@main` or a branch,
+builds `tfpr` from source on every run. That takes longer, and it installs Go
+with `actions/setup-go`, which puts Go on the job's `PATH` for the steps that
+follow.
+
 ```yaml
 # On pull_request: plan and comment
 jobs:
@@ -27,7 +34,7 @@ jobs:
       EXAMPLE_PROVIDER_TOKEN: ${{ secrets.EXAMPLE_PROVIDER_TOKEN }} # provider credentials: job-level env
     steps:
       - uses: actions/checkout@v6
-      - uses: aloutfi/actions/plan@main
+      - uses: aloutfi/actions/plan@vX.Y.Z # a release tag, or its commit SHA
         with:
           stack: infra/
           workspace: prod
@@ -48,10 +55,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - id: plan-run
-        uses: aloutfi/actions/resolve-plan-run@main
+        uses: aloutfi/actions/resolve-plan-run@vX.Y.Z # a release tag, or its commit SHA
         with:
           plan_workflow_filename: pr.yaml
-      - uses: aloutfi/actions/apply@main
+      - uses: aloutfi/actions/apply@vX.Y.Z # a release tag, or its commit SHA
         with:
           stack: infra/
           workspace: prod
@@ -148,9 +155,10 @@ of these that applies:
    script downloads `tfpr_<version>_<os>_<arch>.tar.gz` from this repo's
    GitHub release and checks it against that file's sha256. Pinning
    `aloutfi/actions/plan@<tag or sha>` therefore pins the binary's bytes.
-3. Otherwise (a branch, or any unreleased commit) it builds `tfpr` from the
-   action's own source with `actions/setup-go`. That puts Go on the job's
-   `PATH`.
+3. Otherwise (`@main`, a branch, or any unreleased commit) it builds `tfpr`
+   from the action's own source with `actions/setup-go`. This changes the
+   job: Go is on `PATH` for every step after the action, and the build adds
+   time to each run. Pin a release to avoid both.
 
 ## Development
 
