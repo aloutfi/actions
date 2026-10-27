@@ -1,0 +1,18 @@
+{{- /*
+The apply-result comment. It gets an ApplyView (see core/apply.go).
+*/ -}}
+### {{.Icon}} Terraform apply · {{code .Stack}} ({{code .Workspace}}) · {{.Status}}
+{{if eq .Gate.Reason "superseded" -}}
+> **Superseded by {{code (short .Gate.BranchHead)}}**; that commit's run applies these changes{{with .SupersededBy}} ([link]({{.}})){{end}}.
+{{else if eq .Gate.Action "refuse" -}}
+> **Apply refused**: {{.Explain}}
+{{else if eq .Gate.Reason "no-op" -}}
+> **Apply skipped**: the reviewed plan had no changes, and the merged tree is the tree that was planned.
+{{end -}}
+{{with .SourceLine}}
+Source: {{.}}
+{{end -}}
+{{if .Log}}
+{{details .Failed .LogTitle (fence "text" .Log)}}
+{{end}}
+Commit {{code (short .SHA)}}{{with .JobURL}} · [job log]({{.}}){{end}}{{with .BinaryVersion}} · terraform {{.}}{{end}} · tfpr {{or .ToolVersion "dev"}}

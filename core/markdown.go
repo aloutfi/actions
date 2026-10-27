@@ -184,3 +184,39 @@ func (m measure) cut(text string, limit int) string {
 	}
 	return text
 }
+
+// cutTail keeps the end of text within limit: whole lines from the end, or
+// failing that, the last characters.
+func (m measure) cutTail(text string, limit int) string {
+	if m.of(text) <= limit {
+		return text
+	}
+	lines := strings.SplitAfter(text, "\n")
+	used, start := 0, len(text)
+	for i := len(lines) - 1; i >= 0; i-- {
+		n := m.of(lines[i])
+		if used+n > limit {
+			break
+		}
+		used += n
+		start -= len(lines[i])
+	}
+	if kept := text[start:]; strings.TrimSpace(kept) != "" {
+		return kept
+	}
+	// Only blank lines fit after an over-long last line: keep its end.
+	used = 0
+	for i := len(text); i > 0; {
+		r, size := utf8.DecodeLastRuneInString(text[:i])
+		n := 1
+		if m == inBytes {
+			n = utf8.RuneLen(r)
+		}
+		if used+n > limit {
+			return text[i:]
+		}
+		used += n
+		i -= size
+	}
+	return text
+}
