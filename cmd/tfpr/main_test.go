@@ -23,7 +23,7 @@ type fakeGitHub struct {
 	branchHead string
 	planRun    string
 	failWrites bool
-	failList   bool // listing comments fails
+	failList   bool   // listing comments fails
 	comments   string // JSON for the PR's existing comments
 
 	mu    sync.Mutex
