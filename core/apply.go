@@ -53,7 +53,11 @@ func RenderApplyReport(r ApplyReport) (string, error) {
 	switch {
 	case r.Gate.Action == GateRefuse:
 		v.Icon, v.Status, v.Failed = "🛑", "refused", true
-		v.Explain = "tfpr could not verify that " + code(Short(r.SHA)) + " is still the head of its branch, so applying it might roll back later merges. Re-run from the branch's newest commit."
+		if strings.HasPrefix(r.Gate.Ref, "refs/heads/") {
+			v.Explain = "tfpr could not read the head of " + code(strings.TrimPrefix(r.Gate.Ref, "refs/heads/")) + " to verify that " + code(Short(r.SHA)) + " is still its newest commit, so applying it might roll back later merges. Re-run once the branch head can be read."
+		} else {
+			v.Explain = "this is a re-run of " + code(r.Gate.Ref) + ", which is not a branch, so tfpr can't tell whether " + code(Short(r.SHA)) + " is still current. Trigger a fresh run instead of re-running this one."
+		}
 	case r.Gate.Action == GateSkip && r.Gate.Reason == "superseded":
 		v.Icon, v.Status = "⏭️", "skipped: superseded"
 	case r.Gate.Action == GateSkip:

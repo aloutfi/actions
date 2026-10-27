@@ -29,7 +29,16 @@ func TestRenderApplyReport(t *testing.T) {
 			return r
 		}(), true, []string{"skipped: superseded", "> **Superseded by `def4567`**; that commit's run applies these changes ([link](https://ci.example/run/2))."}},
 		{"no-op", report(GateSkip, "no-op", 0), true, []string{"skipped: no changes", "> **Apply skipped**: the reviewed plan had no changes"}},
-		{"refused", report(GateRefuse, "unverified-ref", 0), false, []string{"🛑 Terraform apply", "refused", "> **Apply refused**: tfpr could not verify that `abc1234`"}},
+		{"refused, branch", func() ApplyReport {
+			r := report(GateRefuse, "unverified-ref", 0)
+			r.Gate.Ref = "refs/heads/main"
+			return r
+		}(), false, []string{"🛑 Terraform apply", "refused", "> **Apply refused**: tfpr could not read the head of `main` to verify that `abc1234` is still its newest commit"}},
+		{"refused, tag re-run", func() ApplyReport {
+			r := report(GateRefuse, "unverified-ref", 0)
+			r.Gate.Ref = "refs/tags/v1"
+			return r
+		}(), false, []string{"> **Apply refused**: this is a re-run of `refs/tags/v1`, which is not a branch", "Trigger a fresh run instead of re-running this one."}},
 		{"planfile source", func() ApplyReport {
 			r := report(GateApply, "", 0)
 			r.Source, r.PlanRun = Decision{Source: SourcePlanfile}, "77"
