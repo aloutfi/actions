@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Plain-bash tests: golden files for `tfpr render`, plus unit tests for the
-# pure helpers. Usage: test/run.sh [--update]   (--update rewrites goldens)
+# Black-box tests for the tfpr CLI: golden files for `tfpr render`, the pure
+# helper case tables in test/cases/, and commands against a fake GitHub.
+# Usage: [TFPR_BIN=path/to/tfpr] test/run.sh [--update]   (--update rewrites goldens)
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tfpr="${TFPR_BIN:-${root}/bin/tfpr}"
+[[ "${tfpr}" == /* ]] || tfpr="${PWD}/${tfpr}"
 update=false
 [[ "${1:-}" == "--update" ]] && update=true
 failures=0
@@ -31,7 +34,7 @@ for dir in */; do
     TFPR_EXIT_CODE="$(cat "${name}/exit_code")" \
     TFPR_RUN_ID=1234 TFPR_JOB_URL="https://ci.example/run/1234/job/5678" \
     TFPR_COMMENT_BUDGET="${budget}" \
-    "${root}/bin/tfpr" render > "${actual}"
+    "${tfpr}" render > "${actual}"
   if [[ "${update}" == "true" ]]; then
     cp "${actual}" "${name}/expected.md"
   fi
@@ -46,28 +49,27 @@ if grep -q '^\[truncated' truncated/expected.md; then pass; else fail "truncatio
 cd "${root}"
 
 # --- pure helpers -----------------------------------------------------------
+# Case tables shared with the Go tests: tab-separated, '#' lines are headers.
+# cases FILE: print the table's rows with tabs turned into \x1f, which `read`
+# splits on without collapsing empty fields.
+cases() { grep -v '^#' "${root}/test/cases/$1" | tr '\t' '\037'; }
+
+# The bash core exposes its helpers by being sourced.
 # shellcheck source=/dev/null
-source "${root}/bin/tfpr"
+source "${tfpr}"
 
-# decide_plan_source USE_PLANFILE ATTEMPT HAS_PLANFILE ALLOW_FALLBACK
-assert_eq "use_planfile=false" "fresh no-artifact-requested" "$(decide_plan_source false 1 true false)"
-assert_eq "first attempt with artifact" "planfile" "$(decide_plan_source true 1 true false)"
-assert_eq "first attempt, missing artifact, fails closed" "none missing-artifact" "$(decide_plan_source true 1 false false)"
-assert_eq "first attempt, missing artifact, fallback allowed" "fresh missing-artifact" "$(decide_plan_source true 1 false true)"
-assert_eq "re-run ignores stored planfile" "fresh rerun" "$(decide_plan_source true 2 true false)"
-assert_eq "re-run with fallback allowed" "fresh rerun" "$(decide_plan_source true 3 false true)"
+while IFS=$'\037' read -r name use attempt has allow expected; do
+  assert_eq "decide_plan_source: ${name}" "${expected}" "$(decide_plan_source "${use}" "${attempt}" "${has}" "${allow}")"
+done < <(cases decide_plan_source.tsv)
 
-# plan_stats PLAN_JSON -> TSV in PLAN_STATS order (tabs shown as |)
-stats() { plan_stats "${root}/test/fixtures/render/$1/plan.json" | tr '\t' '|'; }
-assert_eq "stats no-changes" "0|0|0|0|0|0|0|0|false|false|false|0 to add, 0 to change, 0 to destroy, 0 to replace, 0 to import" "$(stats no-changes)"
-assert_eq "stats changes" "1|1|1|1|0|0|0|0|true|false|false|1 to add, 1 to change, 1 to destroy, 1 to replace, 0 to import" "$(stats changes)"
-assert_eq "stats output-only" "0|0|0|0|0|0|0|1|false|false|true|0 to add, 0 to change, 0 to destroy, 0 to replace, 0 to import" "$(stats output-only)"
-# Forget/move-only plans exit 2 and must not render as "No changes".
-assert_eq "stats moved-removed" "0|0|0|0|0|2|1|0|true|false|false|0 to add, 0 to change, 0 to destroy, 0 to replace, 0 to import, 2 to forget, 1 to move" "$(stats moved-removed)"
+while IFS=$'\037' read -r fixture expected; do
+  assert_eq "plan_stats: ${fixture}" "${expected//$'\037'/|}" \
+    "$(plan_stats "${root}/test/fixtures/render/${fixture}/plan.json" | tr '\t' '|')"
+done < <(cases plan_stats.tsv)
 
-assert_eq "artifact name default stack" "tfplan-terraform-default" "$(artifact_name terraform/ default)"
-assert_eq "artifact name nested stack" "tfplan-stacks-net-core-prod" "$(artifact_name ./stacks/net.core/ prod)"
-assert_eq "artifact name empty workspace" "tfplan-infra-default" "$(artifact_name infra '')"
+while IFS=$'\037' read -r name stack workspace expected; do
+  assert_eq "artifact_name: ${name}" "${expected}" "$(artifact_name "${stack}" "${workspace}")"
+done < <(cases artifact_name.tsv)
 
 # --- commands against a fake GitHub ----------------------------------------
 # A fake gh and a stub terraform on PATH; GitHub Actions env simulated per call.
@@ -80,20 +82,26 @@ cat > "${sandbox}/bin/gh" <<'EOF'
 echo "gh $*" >> "${FAKE_LOG}"
 case "$*" in
   *"-X PATCH"* | *"-X POST"*)
-    if [[ -n "${FAKE_GH_FAIL_WRITE:-}" ]]; then echo "HTTP 403: forbidden" >&2; exit 1; fi ;;
+    if [[ -n "${FAKE_GH_FAIL_WRITE:-}" ]]; then echo "HTTP 403: forbidden" >&2; exit 1; fi
+    # Keep the posted body for the golden comparisons.
+    for arg in "$@"; do [[ "${arg}" != body=@* ]] || cp "${arg#body=@}" "${FAKE_BODY}"; done ;;
   *"/actions/runs/"*"/jobs"*) echo '{"jobs":[]}' ;;
   *"/issues/"*"/comments"*) echo '[]' ;;
   *"/commits/"*"/pulls"*) [[ -z "${FAKE_PR:-}" ]] || echo "${FAKE_PR} headsha" ;;
   *"/git/ref/heads/"*) echo "${FAKE_BRANCH_HEAD}" ;;
+  *"/actions/workflows/"*"/runs?"*) echo "${FAKE_PLAN_RUN:-}" ;;
   *) echo "fake gh: unexpected call: $*" >&2; exit 1 ;;
 esac
 EOF
 cat > "${sandbox}/bin/terraform" <<'EOF'
 #!/usr/bin/env bash
-# Stub terraform: logs each call; apply exits with FAKE_TF_APPLY_CODE.
+# Stub terraform: logs each call; plan and apply exit with FAKE_TF_PLAN_CODE
+# and FAKE_TF_APPLY_CODE; show prints the plan from FAKE_TF_PLAN (a fixture dir).
 echo "terraform $*" >> "${FAKE_LOG}"
 case "$1" in
   version) echo '{"terraform_version":"0.0.0"}' ;;
+  plan) exit "${FAKE_TF_PLAN_CODE:-0}" ;;
+  show) if [[ "$2" == "-json" ]]; then cat "${FAKE_TF_PLAN}/plan.json"; else cat "${FAKE_TF_PLAN}/plan.txt"; fi ;;
   apply) exit "${FAKE_TF_APPLY_CODE:-0}" ;;
 esac
 EOF
@@ -107,22 +115,24 @@ new_ws() {
   mkdir -p "${ws}/stack"
 }
 
-# run_tfpr CMD [VAR=value...]: run bin/tfpr CMD in ${ws} as a first-attempt
+# run_tfpr CMD [VAR=value...]: run tfpr CMD in ${ws} as a first-attempt
 # push build of refs/heads/main at sha "abc", which is also the branch head.
-# Sets RC, OUT (stdout+stderr), OUTPUTS (step outputs), CALLS (gh/terraform).
+# Sets RC, OUT (stdout+stderr), OUTPUTS (step outputs), CALLS (gh/terraform);
+# the last posted comment body is left in ${sandbox}/body.
 run_tfpr() {
   local cmd="$1"
   shift
   : > "${sandbox}/log"
   : > "${sandbox}/outputs"
+  rm -f "${sandbox}/body"
   RC=0
-  (cd "${ws}" && env PATH="${sandbox}/bin:${PATH}" FAKE_LOG="${sandbox}/log" \
+  (cd "${ws}" && env PATH="${sandbox}/bin:${PATH}" FAKE_LOG="${sandbox}/log" FAKE_BODY="${sandbox}/body" \
     GITHUB_ACTIONS=true GITHUB_OUTPUT="${sandbox}/outputs" GITHUB_REPOSITORY=o/r \
     GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_SERVER_URL=https://github.example \
     GITHUB_SHA=abc GITHUB_REF=refs/heads/main GITHUB_ACTOR=me RUNNER_NAME=r \
     GITHUB_EVENT_NAME=push GITHUB_EVENT_PATH="${sandbox}/event.json" \
     FAKE_BRANCH_HEAD=abc FAKE_PR=42 TFPR_STACK=stack TFPR_WORKSPACE=default \
-    "$@" "${root}/bin/tfpr" "${cmd}") > "${sandbox}/stdout" 2>&1 || RC=$?
+    "$@" "${tfpr}" "${cmd}") > "${sandbox}/stdout" 2>&1 || RC=$?
   OUT="$(cat "${sandbox}/stdout")"
   OUTPUTS="$(cat "${sandbox}/outputs")"
   CALLS="$(cat "${sandbox}/log")"
@@ -136,6 +146,32 @@ assert_lacks() {
   if [[ "$2" != *"$3"* ]]; then pass; else fail "$1: expected not to contain '$3' in:"$'\n'"$2"; fi
 }
 
+# assert_golden NAME FILE [ACTUAL]: ACTUAL (default: the last posted comment
+# body) equals test/fixtures/FILE.
+assert_golden() {
+  local golden="${root}/test/fixtures/$2" actual="${3:-${sandbox}/body}"
+  if [[ "${update}" == "true" ]]; then cp "${actual}" "${golden}"; fi
+  if diff -u "${golden}" "${actual}"; then pass; else fail "$1"; fi
+}
+
+# plan: runs terraform in the stack, writes the plan files and step outputs.
+new_ws
+run_tfpr plan FAKE_TF_PLAN="${root}/test/fixtures/render/changes" FAKE_TF_PLAN_CODE=2
+assert_eq "plan: exit code" 0 "${RC}"
+assert_has "plan: validates" "${CALLS}" "terraform validate -no-color"
+assert_has "plan: plans" "${CALLS}" "terraform plan -input=false -no-color -detailed-exitcode -out=tfplan"
+assert_golden "plan: step outputs" plan/outputs "${sandbox}/outputs"
+# created_at is the only field that varies between runs.
+sed 's/"created_at": "[^"]*"/"created_at": "<now>"/' "${ws}/stack/plan-metadata.json" > "${sandbox}/metadata"
+assert_golden "plan: plan-metadata.json" plan/plan-metadata.json "${sandbox}/metadata"
+if cmp -s "${root}/test/fixtures/render/changes/plan.txt" "${ws}/stack/plan.txt"; then pass; else fail "plan: plan.txt"; fi
+
+new_ws
+run_tfpr plan FAKE_TF_PLAN_CODE=1
+assert_eq "plan error: exit code" 1 "${RC}"
+assert_eq "plan error: outputs" "exit_code=1" "${OUTPUTS}"
+assert_lacks "plan error: no show" "${CALLS}" "terraform show"
+
 # Comment failures are best effort: they warn and keep the command's result.
 new_ws
 run_tfpr apply FAKE_GH_FAIL_WRITE=1
@@ -148,6 +184,11 @@ run_tfpr apply FAKE_GH_FAIL_WRITE=1 FAKE_TF_APPLY_CODE=3
 assert_eq "apply fails + comment fails: exit code" 3 "${RC}"
 
 new_ws
+run_tfpr apply FAKE_TF_APPLY_CODE=3 GITHUB_RUN_ATTEMPT=2 TFPR_USE_PLANFILE=true TFPR_PLAN_RUN_ID=77
+assert_eq "re-run apply fails: exit code" 3 "${RC}"
+assert_golden "re-run apply fails: apply comment" comments/apply-rerun-failed.md
+
+new_ws
 cp "${root}/test/fixtures/render/no-changes/plan."* "${ws}/stack/"
 run_tfpr comment FAKE_GH_FAIL_WRITE=1 GITHUB_EVENT_NAME=pull_request TFPR_EXIT_CODE=0
 assert_eq "plan comment fails: exit code" 0 "${RC}"
@@ -158,6 +199,7 @@ cp "${root}/test/fixtures/render/no-changes/plan."* "${ws}/stack/"
 run_tfpr comment GITHUB_EVENT_NAME=pull_request TFPR_EXIT_CODE=0
 assert_eq "plan comment posts: exit code" 0 "${RC}"
 assert_has "plan comment posts" "${CALLS}" "gh api -X POST repos/o/r/issues/42/comments"
+assert_golden "plan comment posts: body" comments/plan.md
 
 # A missing artifact fails closed and points at retention and the opt-in fallback.
 new_ws
@@ -191,6 +233,7 @@ assert_has "matching artifact: applies planfile" "${CALLS}" "terraform apply -in
 assert_lacks "matching artifact: no -auto-approve" "${CALLS}" "-auto-approve"
 assert_eq "matching artifact: reviewed plan copied over local one" "reviewed plan" "$(cat "${ws}/stack/tfplan")"
 assert_has "matching artifact: output" "${OUTPUTS}" "used_plan_artifact=true"
+assert_golden "matching artifact: apply comment" comments/apply-planfile.md
 
 new_ws
 plan_artifact other-stack default
@@ -234,6 +277,7 @@ assert_eq "first attempt, branch moved: refused" 1 "${RC}"
 assert_has "first attempt, branch moved: error" "${OUT}" "::error::Fresh apply refused (attempt=1): commit abc is no longer the head of 'main' (now def)"
 assert_lacks "first attempt, branch moved: no apply" "${CALLS}" "terraform apply"
 assert_has "first attempt, branch moved: reason" "${OUTPUTS}" "fallback_reason=superseded"
+assert_golden "first attempt, branch moved: apply comment" comments/apply-superseded.md
 
 new_ws
 run_tfpr apply GITHUB_RUN_ATTEMPT=2 TFPR_USE_PLANFILE=true
@@ -264,6 +308,28 @@ plan_artifact stack default
 run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact FAKE_BRANCH_HEAD=def
 assert_eq "planfile apply skips the guard: exit code" 0 "${RC}"
 assert_lacks "planfile apply skips the guard: no head lookup" "${CALLS}" "git/ref/heads"
+
+# resolve-plan-run: merge commit -> its PR -> that PR's plan run.
+new_ws
+run_tfpr resolve-plan-run TFPR_PLAN_WORKFLOW=pr.yaml FAKE_PLAN_RUN=99
+assert_eq "resolve: exit code" 0 "${RC}"
+assert_has "resolve: queries the head sha" "${CALLS}" "repos/o/r/actions/workflows/pr.yaml/runs?head_sha=headsha&status=success&per_page=1"
+assert_eq "resolve: outputs" $'run_id=99\npr_number=42' "${OUTPUTS}"
+
+new_ws
+run_tfpr resolve-plan-run TFPR_PLAN_WORKFLOW=pr.yaml
+assert_has "resolve, no run: notice" "${OUT}" "::notice::No successful 'pr.yaml' run found for head_sha=headsha (PR #42)"
+assert_eq "resolve, no run: outputs" $'run_id=\npr_number=42' "${OUTPUTS}"
+
+new_ws
+run_tfpr resolve-plan-run TFPR_PLAN_WORKFLOW=pr.yaml FAKE_PR=
+assert_has "resolve, no PR: notice" "${OUT}" "::notice::No PR associated with abc"
+assert_eq "resolve, no PR: outputs" $'run_id=\npr_number=' "${OUTPUTS}"
+
+new_ws
+run_tfpr resolve-plan-run TFPR_PLAN_WORKFLOW=pr.yaml GITHUB_RUN_ATTEMPT=2
+assert_has "resolve, re-run: notice" "${OUT}" "::notice::Re-run detected (attempt=2)"
+assert_lacks "resolve, re-run: no lookups" "${CALLS}" "gh api"
 
 # --- action wrappers (static checks) ----------------------------------------
 # assert_yaml NAME FILE LINE: FILE contains LINE (whitespace-trimmed) verbatim.

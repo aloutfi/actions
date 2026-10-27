@@ -1,0 +1,4 @@
+# name	stack	workspace	expected
+default stack	terraform/	default	tfplan-terraform-default
+nested stack	./stacks/net.core/	prod	tfplan-stacks-net-core-prod
+empty workspace	infra		tfplan-infra-default

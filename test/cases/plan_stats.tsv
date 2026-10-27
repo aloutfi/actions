@@ -1,0 +1,5 @@
+# fixture	creates	updates	destroys	replaces	imports	forgets	moves	output_changes	has_changes	has_imports	has_output_changes	summary
+no-changes	0	0	0	0	0	0	0	0	false	false	false	0 to add, 0 to change, 0 to destroy, 0 to replace, 0 to import
+changes	1	1	1	1	0	0	0	0	true	false	false	1 to add, 1 to change, 1 to destroy, 1 to replace, 0 to import
+output-only	0	0	0	0	0	0	0	1	false	false	true	0 to add, 0 to change, 0 to destroy, 0 to replace, 0 to import
+moved-removed	0	0	0	0	0	2	1	0	true	false	false	0 to add, 0 to change, 0 to destroy, 0 to replace, 0 to import, 2 to forget, 1 to move

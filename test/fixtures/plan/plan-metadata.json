@@ -1,0 +1,11 @@
+{
+  "sha": "abc",
+  "pr_number": "",
+  "actor": "me",
+  "created_at": "<now>",
+  "stack": "stack",
+  "workspace": "default",
+  "terraform_version": "0.0.0",
+  "has_changes": true,
+  "has_imports": false
+}
