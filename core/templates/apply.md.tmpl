@@ -1,0 +1,21 @@
+{{.Marker}}
+## {{.Icon}} Terraform Apply — `{{.Stack}}` (`{{.Workspace}}`) — {{.Status}}
+
+**Source:** {{.SourceLine}}  
+**Run:** [{{.RunID}}]({{.RunURL}})  
+**Commit:** `{{.SHA}}`
+
+<details><summary>Debug</summary>
+
+| Field | Value |
+|---|---|
+| Stack | `{{.Stack}}` |
+| Workspace | `{{.Workspace}}` |
+| Used planfile | `{{.UsedPlanfile}}` |
+| Planfile artifact | `{{or .Artifact "n/a"}}` |
+| Planfile source run | `{{or .PlanRun "(current run)"}}` |
+| Fallback reason | `{{or .Reason "n/a"}}` |
+| Apply exit code | `{{.ExitCode}}` |
+| Terraform version | `{{.TerraformVersion}}` |
+
+</details>
