@@ -71,20 +71,33 @@ artifact_name() {
   echo "tfplan-${slug}-${2:-default}"
 }
 
-# plan_counts PLAN_JSON -> TSV: creates updates destroys replaces imports output_changes
+# Fields printed by plan_stats, in order. They are also tfpr plan's step outputs.
+PLAN_STATS=(creates updates destroys replaces imports output_changes
+  has_changes has_imports has_output_changes summary)
+
+# plan_stats PLAN_JSON -> one TSV line of PLAN_STATS.
 # terraform show -json emits resource_changes[] with change.actions =
 # ["no-op"|"create"|"read"|"update"|"delete"] or ["create","delete"] for
 # replace; change.importing = { id: "..." } for imports.
-plan_counts() {
+# Callers read it with: local "${PLAN_STATS[@]}"; IFS=$'\t' read -r "${PLAN_STATS[@]}"
+plan_stats() {
   jq -r '
-    {
-      creates:  [.resource_changes[]? | select(.change.actions | index("create")) | select(.change.actions | index("delete") | not)] | length,
-      updates:  [.resource_changes[]? | select(.change.actions == ["update"])] | length,
-      destroys: [.resource_changes[]? | select(.change.actions | index("delete")) | select(.change.actions | index("create") | not)] | length,
-      replaces: [.resource_changes[]? | select(.change.actions | (index("create") and index("delete")))] | length,
-      imports:  [.resource_changes[]? | select(.change.importing != null)] | length,
-      outputs:  [.output_changes[]?    | select(.actions != ["no-op"])] | length
-    } | [.creates, .updates, .destroys, .replaces, .imports, .outputs] | @tsv
+    [.resource_changes[]? | .change] as $rc
+    | {
+        creates:  [$rc[] | select(.actions | index("create")) | select(.actions | index("delete") | not)] | length,
+        updates:  [$rc[] | select(.actions == ["update"])] | length,
+        destroys: [$rc[] | select(.actions | index("delete")) | select(.actions | index("create") | not)] | length,
+        replaces: [$rc[] | select(.actions | (index("create") and index("delete")))] | length,
+        imports:  [$rc[] | select(.importing != null)] | length,
+        output_changes: [.output_changes[]? | select(.actions != ["no-op"])] | length
+      }
+    | .has_changes = (.creates + .updates + .destroys + .replaces > 0)
+    | .has_imports = (.imports > 0)
+    | .has_output_changes = (.output_changes > 0)
+    | .summary = "\(.creates) to add, \(.updates) to change, \(.destroys) to destroy, \(.replaces) to replace, \(.imports) to import"
+    | [.creates, .updates, .destroys, .replaces, .imports, .output_changes,
+       .has_changes, .has_imports, .has_output_changes, .summary]
+    | @tsv
   ' "$1"
 }
 
@@ -117,11 +130,11 @@ decide_plan_source() {
 # Commands
 # ---------------------------------------------------------------------------
 
+# shellcheck disable=SC2154 # PLAN_STATS locals are assigned by read
 cmd_plan() {
   load_ci
-  local code=0 counts creates updates destroys replaces imports output_changes
-  local has_changes=false has_imports=false has_output_changes=false
-  local name
+  local code=0 stats stat name
+  local "${PLAN_STATS[@]}"
   name="$(artifact_name "${TFPR_STACK}" "${TFPR_WORKSPACE}")"
   cd "${TFPR_STACK}"
 
@@ -135,22 +148,11 @@ cmd_plan() {
 
   terraform show -json tfplan > plan.json
   terraform show -no-color tfplan > plan.txt
-  counts="$(plan_counts plan.json)"
-  IFS=$'\t' read -r creates updates destroys replaces imports output_changes <<< "${counts}"
-  [[ $((creates + updates + destroys + replaces)) -gt 0 ]] && has_changes=true
-  [[ "${imports}" -gt 0 ]] && has_imports=true
-  [[ "${output_changes}" -gt 0 ]] && has_output_changes=true
-
-  ci_output creates "${creates}"
-  ci_output updates "${updates}"
-  ci_output destroys "${destroys}"
-  ci_output replaces "${replaces}"
-  ci_output imports "${imports}"
-  ci_output output_changes "${output_changes}"
-  ci_output has_changes "${has_changes}"
-  ci_output has_imports "${has_imports}"
-  ci_output has_output_changes "${has_output_changes}"
-  ci_output summary "${creates} to add, ${updates} to change, ${destroys} to destroy, ${replaces} to replace, ${imports} to import"
+  stats="$(plan_stats plan.json)"
+  IFS=$'\t' read -r "${PLAN_STATS[@]}" <<< "${stats}"
+  for stat in "${PLAN_STATS[@]}"; do
+    ci_output "${stat}" "${!stat}"
+  done
   ci_output plan_artifact_name "${name}"
 
   jq -n \
@@ -166,19 +168,16 @@ cmd_plan() {
     '$ARGS.named' > plan-metadata.json
 }
 
+# shellcheck disable=SC2154 # PLAN_STATS locals are assigned by read
 cmd_render() {
   local dir="${TFPR_STACK}" stack="${TFPR_STACK}" ws="${TFPR_WORKSPACE:-default}"
   local exit_code="${TFPR_EXIT_CODE:?TFPR_EXIT_CODE is required}"
   local run_id="${TFPR_RUN_ID:-}" job_url="${TFPR_JOB_URL:-}" budget="${TFPR_COMMENT_BUDGET}"
-  local counts creates updates destroys replaces imports output_changes
-  local status_icon counts_phrase details_open plan_txt diff_summary
+  local stats status_icon counts_phrase details_open plan_txt diff_summary
+  local "${PLAN_STATS[@]}"
 
-  counts="$(plan_counts "${dir}/plan.json")"
-  IFS=$'\t' read -r creates updates destroys replaces imports output_changes <<< "${counts}"
-  local has_changes=false has_imports=false has_output_changes=false
-  [[ $((creates + updates + destroys + replaces)) -gt 0 ]] && has_changes=true
-  [[ "${imports}" -gt 0 ]] && has_imports=true
-  [[ "${output_changes}" -gt 0 ]] && has_output_changes=true
+  stats="$(plan_stats "${dir}/plan.json")"
+  IFS=$'\t' read -r "${PLAN_STATS[@]}" <<< "${stats}"
 
   status_icon="✅"
   [[ "${has_output_changes}" == "true" ]] && status_icon="🔸"
@@ -186,7 +185,7 @@ cmd_render() {
   [[ "${has_imports}" == "true" ]] && status_icon="📥"
 
   if [[ "${has_changes}" == "true" || "${has_imports}" == "true" ]]; then
-    counts_phrase="${creates} to add, ${updates} to change, ${destroys} to destroy, ${replaces} to replace, ${imports} to import"
+    counts_phrase="${summary}"
     details_open=" open"
   elif [[ "${has_output_changes}" == "true" ]]; then
     # Output-only plan (exit 2, zero resource changes) is still a real diff:
@@ -353,14 +352,14 @@ cmd_apply() {
   ci_output apply_exit_code "${code}"
   ci_output used_plan_artifact "${used}"
   ci_output fallback_reason "${reason}"
-  post_apply_comment "${code}" "${source}" "${reason}" "${use_planfile}" "${attempt}"
+  post_apply_comment "${code}" "${source}" "${reason}" "${used}" "${use_planfile}" "${attempt}"
   return "${code}"
 }
 
 post_apply_comment() {
-  local code="$1" source="$2" reason="$3" use_planfile="$4" attempt="$5"
+  local code="$1" source="$2" reason="$3" used="$4" use_planfile="$5" attempt="$6"
   local sha pr stack="${TFPR_STACK}" ws="${TFPR_WORKSPACE:-default}" plan_run="${TFPR_PLAN_RUN_ID:-}"
-  local status_icon status_text source_line artifact="n/a" run_id run_url body used=false
+  local status_icon status_text source_line artifact="n/a" run_id run_url body
   sha="$(ci_sha)"
 
   # Not every apply comes from a PR merge (drift, manual dispatch); skip quietly.
@@ -387,7 +386,6 @@ post_apply_comment() {
     *) source_line="fresh plan" ;;
   esac
 
-  [[ "${source}" == "planfile" ]] && used=true
   if [[ "${use_planfile}" == "true" && "${attempt}" -le 1 ]]; then
     artifact="$(artifact_name "${stack}" "${ws}")"
   fi

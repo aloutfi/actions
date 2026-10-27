@@ -57,6 +57,12 @@ assert_eq "first attempt, missing artifact, fallback allowed" "fresh missing-art
 assert_eq "re-run ignores stored planfile" "fresh rerun" "$(decide_plan_source true 2 true false)"
 assert_eq "re-run with fallback allowed" "fresh rerun" "$(decide_plan_source true 3 false true)"
 
+# plan_stats PLAN_JSON -> TSV in PLAN_STATS order (tabs shown as |)
+stats() { plan_stats "${root}/test/fixtures/render/$1/plan.json" | tr '\t' '|'; }
+assert_eq "stats no-changes" "0|0|0|0|0|0|false|false|false|0 to add, 0 to change, 0 to destroy, 0 to replace, 0 to import" "$(stats no-changes)"
+assert_eq "stats changes" "1|1|1|1|0|0|true|false|false|1 to add, 1 to change, 1 to destroy, 1 to replace, 0 to import" "$(stats changes)"
+assert_eq "stats output-only" "0|0|0|0|0|1|false|false|true|0 to add, 0 to change, 0 to destroy, 0 to replace, 0 to import" "$(stats output-only)"
+
 assert_eq "artifact name default stack" "tfplan-terraform-default" "$(artifact_name terraform/ default)"
 assert_eq "artifact name nested stack" "tfplan-stacks-net-core-prod" "$(artifact_name ./stacks/net.core/ prod)"
 assert_eq "artifact name empty workspace" "tfplan-infra-default" "$(artifact_name infra '')"
