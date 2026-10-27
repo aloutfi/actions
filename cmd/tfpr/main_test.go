@@ -151,7 +151,7 @@ func newScenario(t *testing.T) *scenario {
 		"TFPR_REPO", "TFPR_OUTPUT_FILE", "TFPR_DIR", "TFPR_FILTER", "TFPR_PLAN_JSON", "TFPR_PLAN_TXT", "TFPR_PLANFILE",
 		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED",
 		"FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY", "TFPR_ADO_TOKEN", "TFPR_ACK", "TF_BUILD",
-		"BUILD_REPOSITORY_PROVIDER", "SYSTEM_COLLECTIONURI", "TFPR_GITHUB_API_URL",
+		"BUILD_REPOSITORY_PROVIDER", "SYSTEM_COLLECTIONURI", "TFPR_GITHUB_API_URL", "BUILD_REPOSITORY_URI",
 		"SYSTEM_PULLREQUEST_PULLREQUESTID", "SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "SYSTEM_PULLREQUEST_SOURCECOMMITID"} {
 		env[k] = ""
 	}
@@ -1030,6 +1030,24 @@ func TestAzurePipelinesWithGitHubRepo(t *testing.T) {
 	eq(t, "with the GitHub token", "Bearer gh-token", s.gh.auth)
 	has(t, "links the Azure run", r.body, "https://dev.azure.example/org/proj/_build/results?buildId=812")
 	has(t, "records the PR head", r.body, `"sha":"abc"`)
+}
+
+// A GitHub Enterprise repo on Azure Pipelines never falls back to the public
+// GitHub API: without the enterprise API URL, comment fails and sends
+// nothing.
+func TestGitHubEnterpriseNeedsItsAPI(t *testing.T) {
+	s := newScenario(t)
+	s.azure("GitHubEnterprise").set("TFPR_GITHUB_TOKEN", "ghe-token")
+	s.byo("no-changes")
+	r := s.run("comment")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "says how to fix it", r.out, "set TFPR_GITHUB_API_URL")
+	eq(t, "no requests", "", r.api)
+
+	s.set("TFPR_GITHUB_API_URL", s.env["GITHUB_API_URL"])
+	r = s.run("comment")
+	eq(t, "with the URL: exit code", 0, r.rc)
+	has(t, "with the URL: comments", r.api, "POST /repos/o/r/issues/42/comments")
 }
 
 // fakeAzureRepos records thread creation on an empty PR.

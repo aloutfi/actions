@@ -80,6 +80,23 @@ func TestAzureContext(t *testing.T) {
 	}
 }
 
+// GitHub Enterprise: the API is on the repository's host, and without that
+// host the context says so instead of leaving the public API as a default.
+func TestAzureGitHubEnterprise(t *testing.T) {
+	c := newAzure(snapshot(t, "azure-pr-ghe"), io.Discard, io.Discard, nil).Context()
+	if c.VCS != "github" || c.VCSURL != "https://ghe.example.com/api/v3" || !c.VCSPrivate || c.Repo != "team/infra" || c.PR != "3" {
+		t.Errorf("context %+v", c)
+	}
+	c = newAzure(envOf(map[string]string{"BUILD_REPOSITORY_PROVIDER": "GitHubEnterprise"}), io.Discard, io.Discard, nil).Context()
+	if c.VCSURL != "" || !c.VCSPrivate {
+		t.Errorf("no repository URI: %+v", c)
+	}
+	c = newAzure(snapshot(t, "azure-pr-github"), io.Discard, io.Discard, nil).Context()
+	if c.VCSPrivate || c.VCSURL != "" {
+		t.Errorf("github.com: %+v", c)
+	}
+}
+
 func TestAzureLogsBothPRCommits(t *testing.T) {
 	var stderr bytes.Buffer
 	newAzure(snapshot(t, "azure-pr-tfsgit"), io.Discard, &stderr, nil)

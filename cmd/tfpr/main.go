@@ -122,7 +122,8 @@ func asTFFailed(cmd string, err error) error {
 type app struct {
 	stdout, stderr   io.Writer
 	stack, workspace string
-	api              *vcs.Client
+	api              *vcs.Client // the one GitHub client
+	apiErr           error       // why its base URL is unknown
 	filter           redact.Filter
 	tfBin            string // resolved terraform executable
 	tfErr            error  // why tfBin could not be resolved
@@ -184,19 +185,26 @@ func (a *app) loadCI() {
 	a.api = &vcs.Client{}
 	a.ci = ci.Detect(os.Getenv, a.stdout, a.stderr, a.api)
 	a.ctx = a.ci.Context()
-	*a.api = *vcs.NewGitHubClient(githubAPIURL(a.ctx), githubToken())
+	var base string
+	base, a.apiErr = githubAPIURL(a.ctx) // on error base is "": every request fails
+	*a.api = *vcs.NewGitHubClient(base, githubToken())
 }
 
 // githubAPIURL is the GitHub API to use: TFPR_GITHUB_API_URL, else what the
-// CI says (GITHUB_API_URL on GitHub Actions), else the public API.
-func githubAPIURL(ctx ci.Ctx) string {
+// CI says (GITHUB_API_URL on GitHub Actions, the repository's host for
+// GitHub Enterprise on Azure Pipelines), else the public API, but never the
+// public API for a private host.
+func githubAPIURL(ctx ci.Ctx) (string, error) {
 	if u := os.Getenv("TFPR_GITHUB_API_URL"); u != "" {
-		return u
+		return u, nil
 	}
 	if ctx.VCS == "github" && ctx.VCSURL != "" {
-		return ctx.VCSURL
+		return ctx.VCSURL, nil
 	}
-	return vcs.GitHubAPI
+	if ctx.VCSPrivate {
+		return "", errors.New("the repository is on GitHub Enterprise, but its API URL is unknown: set TFPR_GITHUB_API_URL (https://<host>/api/v3); tfpr will not send its token to api.github.com")
+	}
+	return vcs.GitHubAPI, nil
 }
 
 // loadVCS picks the repo host: TFPR_VCS, else the one the CI says the repo
@@ -212,6 +220,9 @@ func (a *app) loadVCS() (vcs.VCS, error) {
 	if cfg.Name == "azure" {
 		cfg.URL, cfg.Token = a.ctx.VCSURL, os.Getenv("TFPR_ADO_TOKEN")
 	} else {
+		if a.apiErr != nil && cfg.Name != "none" {
+			return nil, a.apiErr
+		}
 		cfg.GitHub = a.api
 	}
 	return vcs.New(cfg)

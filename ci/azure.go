@@ -63,6 +63,14 @@ func (a *Azure) Context() Ctx {
 		// On GitHub repos PullRequestId is Azure's internal id; the number
 		// GitHub knows is PullRequestNumber.
 		c.VCS, c.Repo, c.PR = "github", e("BUILD_REPOSITORY_NAME"), e("SYSTEM_PULLREQUEST_PULLREQUESTNUMBER")
+		if e("BUILD_REPOSITORY_PROVIDER") == "GitHubEnterprise" {
+			// The enterprise API lives on the repository's host. Without it,
+			// tfpr must not guess api.github.com and send it the token.
+			c.VCSPrivate = true
+			if u, err := url.Parse(e("BUILD_REPOSITORY_URI")); err == nil && u.Scheme == "https" && u.Host != "" {
+				c.VCSURL = "https://" + u.Host + "/api/v3"
+			}
+		}
 	}
 	return c
 }

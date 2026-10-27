@@ -7,7 +7,11 @@ detects Azure Pipelines from `TF_BUILD=True`. The repo host follows
 - Azure Repos (`TfsGit`): one PR thread per stack, through the Azure Repos
   REST API.
 - GitHub: comments on the GitHub PR. This is the same code GitHub Actions
-  uses; set `TFPR_GITHUB_TOKEN` instead of `TFPR_ADO_TOKEN`.
+  uses; set `TFPR_GITHUB_TOKEN` instead of `TFPR_ADO_TOKEN`. For GitHub
+  Enterprise, tfpr uses the API on the repository's host
+  (`https://<host>/api/v3`, taken from `Build.Repository.Uri`) or
+  `TFPR_GITHUB_API_URL`. It never falls back to api.github.com, which would
+  send your enterprise token there: if neither is known, it fails.
 
 This page covers the PR flow: plan, then comment. Apply on the main branch
 (`gate` and `report`) and scheduled drift detection come next.

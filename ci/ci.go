@@ -29,6 +29,7 @@ type Ctx struct {
 	Repo          string // repo id the VCS adapter understands
 	VCS           string // the repo host this CI says the repo lives on: github, azure; "" unknown
 	VCSURL        string // that host's API base URL, when the CI knows it
+	VCSPrivate    bool   // the host is private (GitHub Enterprise): never fall back to a public API
 	Actor         string
 	Attempt       int // 1 on the first attempt; 0 when the CI has no counter
 }
