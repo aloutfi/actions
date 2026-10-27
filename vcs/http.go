@@ -16,7 +16,9 @@ import (
 var retryDelay = 2 * time.Second
 
 // Client is a minimal JSON REST client shared by the adapters. It retries a
-// request once on a 5xx or 429 response and does nothing more clever.
+// GET or PATCH once on a 5xx or 429 response and does nothing more clever.
+// POST is never retried: a 5xx can arrive after the server created the
+// resource, and a second POST would duplicate it.
 type Client struct {
 	BaseURL string            // e.g. https://api.github.com
 	Header  map[string]string // sent with every request (auth, accept, ...)
@@ -56,7 +58,7 @@ func (c *Client) Do(method, path string, body, out any) (http.Header, error) {
 
 	data, header, err := c.send(method, url, payload)
 	var se *StatusError
-	if errors.As(err, &se) && (se.Status >= 500 || se.Status == http.StatusTooManyRequests) {
+	if retryable(method) && errors.As(err, &se) && (se.Status >= 500 || se.Status == http.StatusTooManyRequests) {
 		time.Sleep(retryDelay)
 		data, header, err = c.send(method, url, payload)
 	}
@@ -69,6 +71,12 @@ func (c *Client) Do(method, path string, body, out any) (http.Header, error) {
 		}
 	}
 	return header, nil
+}
+
+// retryable reports whether repeating method is safe: GET reads, and PATCH
+// sets the same body twice.
+func retryable(method string) bool {
+	return method == http.MethodGet || method == http.MethodPatch
 }
 
 // GetPages GETs path and every following page (Link rel="next"), decoding

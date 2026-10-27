@@ -80,6 +80,26 @@ func TestDoRetriesOnceOn5xxAnd429(t *testing.T) {
 	}
 }
 
+func TestDoRetriesOnlyIdempotentMethods(t *testing.T) {
+	for _, c := range []struct {
+		method string
+		calls  int
+	}{
+		{http.MethodGet, 2},
+		{http.MethodPatch, 2},
+		{http.MethodPost, 1},
+	} {
+		s, api := newServer(t, ok(`{}`), 502)
+		_, err := api.Do(c.method, "/thing", map[string]string{"body": "b"}, nil)
+		if len(s.calls) != c.calls {
+			t.Errorf("%s: want %d calls, got %d", c.method, c.calls, len(s.calls))
+		}
+		if c.method == http.MethodPost && err == nil {
+			t.Errorf("POST: want the 502 returned")
+		}
+	}
+}
+
 func TestClientSendsAuth(t *testing.T) {
 	_, api := newServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
