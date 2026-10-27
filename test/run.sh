@@ -298,7 +298,7 @@ assert_yaml() {
 # A blank plan_artifact_run_id must mean the current run, not an empty run-id.
 # shellcheck disable=SC2016
 assert_yaml "apply run-id falls back to current run" apply/action.yml \
-  'run-id: ${{ inputs.plan_artifact_run_id || github.run_id }}'
+  'run-id: ${{ inputs.plan_artifact_run_id || steps.gate.outputs.plan_run_id || github.run_id }}'
 
 # shellcheck disable=SC2016
 assert_yaml "plan artifact retention is an input" plan/action.yml \
@@ -320,7 +320,7 @@ assert_yaml "apply downloads outside the stack" apply/action.yml \
   'path: ${{ runner.temp }}/tfpr-plan-artifact'
 
 # Every action installs tfpr first and runs only that binary.
-for action in plan apply resolve-plan-run; do
+for action in plan apply gate report; do
   # shellcheck disable=SC2016
   assert_yaml "${action} locates tfpr" "${action}/action.yml" \
     'run: '\''"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh"'\'

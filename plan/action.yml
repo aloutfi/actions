@@ -45,6 +45,17 @@ inputs:
       default comment's blocks of the same name (TFPR_TEMPLATE)
     required: false
     default: ""
+  mode:
+    description: >-
+      'pr' (default) or 'drift': a scheduled drift check that touches no PR. It
+      writes the full plan to the job summary, sets the drifted output, and
+      warns with the stack's name if anything drifted
+    required: false
+    default: "pr"
+  fail_on_drift:
+    description: In drift mode, fail the step when the stack drifted
+    required: false
+    default: "false"
   comment_author:
     description: Login that owns the PR comment. Only its comments are updated.
     required: false
@@ -73,6 +84,9 @@ outputs:
   plan_artifact_name:
     description: Artifact name for the planfile (uploaded when output_planfile=true)
     value: ${{ steps.plan.outputs.plan_artifact_name }}
+  drifted:
+    description: "Drift mode: 'true' when the plan would change anything"
+    value: ${{ steps.comment.outputs.has_changes }}
   plan_text_url:
     description: Download URL of the plan.txt artifact (upload_plan_text=true)
     value: ${{ steps.plan-text-upload.outputs.artifact-url }}
@@ -112,6 +126,7 @@ runs:
         TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
         TFPR_STACK: ${{ inputs.stack }}
         TFPR_WORKSPACE: ${{ inputs.workspace }}
+        TFPR_MODE: ${{ inputs.mode }}
       run: '"${TFPR}" plan'
 
     - name: Upload plan artifact
@@ -155,6 +170,7 @@ runs:
     # cancelled run, which may have been superseded by a newer, good plan.
     # Outside a pull request it writes only the job summary.
     - name: Job summary and PR comment
+      id: comment
       if: ${{ !cancelled() }}
       shell: bash
       env:
@@ -166,4 +182,6 @@ runs:
         TFPR_PLAN_TXT_URL: ${{ steps.plan-text-upload.outputs.artifact-url }}
         TFPR_SUMMARY: ${{ inputs.job_summary }}
         TFPR_TEMPLATE: ${{ inputs.template }}
+        TFPR_MODE: ${{ inputs.mode }}
+        TFPR_FAIL_ON_DRIFT: ${{ inputs.fail_on_drift }}
       run: '"${TFPR}" comment'

@@ -1,11 +1,14 @@
 name: "Terraform Apply"
 description: >-
-  Apply the reviewed planfile from the plan action's artifact, or a fresh plan
-  when no planfile is requested or the run is a re-run. A requested planfile
-  that is missing fails the apply unless allow_fresh_plan_fallback is true.
-  A fresh apply is refused unless the run's commit is still the head of its
-  branch (first attempts on non-branch refs are allowed with a warning).
-  Provider credentials come from job-level `env:` (see the plan action).
+  Gate, apply and report. A commit that is no longer its branch's head is a
+  clean skip: the run for the newer head applies (first attempts on
+  non-branch refs are allowed with a warning; anything unverifiable fails).
+  Otherwise apply the reviewed planfile from the plan action's artifact (the
+  plan run comes from tfpr's comment record on the merged PR), or a fresh
+  plan when no planfile is requested or the run is a re-run. A requested
+  planfile that is missing fails the apply unless allow_fresh_plan_fallback
+  is true. The result is posted on the merged PR. Provider credentials come
+  from job-level `env:` (see the plan action).
 
 inputs:
   stack:
@@ -33,9 +36,17 @@ inputs:
     required: false
     default: "false"
   plan_artifact_run_id:
-    description: Workflow run ID that produced the planfile (blank = current run)
+    description: >-
+      Workflow run ID that produced the planfile (blank = the run named in the
+      PR's plan record, else the current run)
     required: false
     default: ""
+  skip_noop:
+    description: >-
+      Skip the apply when the PR's reviewed plan was a no-op and the merged tree
+      is the tree that was planned (see the gate action)
+    required: false
+    default: "false"
   lock_timeout:
     description: terraform apply -lock-timeout value
     required: false
@@ -50,14 +61,17 @@ inputs:
     default: ${{ github.token }}
 
 outputs:
+  action:
+    description: "'apply' | 'skip' | 'refuse'"
+    value: ${{ steps.apply.outputs.action }}
   apply_exit_code:
-    description: terraform apply exit code
+    description: terraform apply exit code (empty when skipped)
     value: ${{ steps.apply.outputs.apply_exit_code }}
   used_plan_artifact:
     description: "'true' | 'false'"
     value: ${{ steps.apply.outputs.used_plan_artifact }}
   fallback_reason:
-    description: "'rerun' | 'missing-artifact' | 'no-artifact-requested' | 'superseded' | 'unverified-ref' | ''"
+    description: "'rerun' | 'missing-artifact' | 'no-artifact-requested' | 'superseded' | 'no-op' | 'unverified-ref' | ''"
     value: ${{ steps.apply.outputs.fallback_reason }}
 
 runs:
@@ -88,33 +102,39 @@ runs:
         terraform_version: ${{ inputs.terraform_version }}
         terraform_wrapper: false
 
-    - name: Decide plan source
-      id: decide
+    # Writes decision.json, which the apply step acts on. A refusal fails
+    # this step; the apply step still runs to report it.
+    - name: Gate
+      id: gate
       shell: bash
       env:
         TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
         TFPR_STACK: ${{ inputs.stack }}
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
+        TFPR_SKIP_NOOP: ${{ inputs.skip_noop }}
         TFPR_PLAN_DIR: ${{ runner.temp }}/tfpr-plan-artifact
-      run: '"${TFPR}" decide'
+        TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
+        TFPR_GITHUB_TOKEN: ${{ inputs.token }}
+      run: '"${TFPR}" gate'
 
     - name: Download plan artifact
-      if: steps.decide.outputs.download == 'true'
+      if: steps.gate.outputs.download == 'true'
       # A missing artifact is handled by `tfpr apply` (fail closed or fall back).
       continue-on-error: true
       uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
-        name: ${{ steps.decide.outputs.artifact_name }}
+        name: ${{ steps.gate.outputs.artifact_name }}
         # Not the stack directory: only this download may supply the reviewed plan.
         path: ${{ runner.temp }}/tfpr-plan-artifact
-        run-id: ${{ inputs.plan_artifact_run_id || github.run_id }}
+        run-id: ${{ inputs.plan_artifact_run_id || steps.gate.outputs.plan_run_id || github.run_id }}
         # Cross-run downloads need github-token; without it the action looks
         # only at the current run and reports "not found".
         github-token: ${{ inputs.token }}
 
     - name: Terraform apply
       id: apply
+      if: ${{ !cancelled() && steps.gate.outcome != 'skipped' }}
       shell: bash
       env:
         TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
@@ -123,7 +143,8 @@ runs:
         TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
         TFPR_ALLOW_FRESH_PLAN_FALLBACK: ${{ inputs.allow_fresh_plan_fallback }}
         TFPR_PLAN_DIR: ${{ runner.temp }}/tfpr-plan-artifact
-        TFPR_PLAN_RUN_ID: ${{ inputs.plan_artifact_run_id }}
+        TFPR_PLAN_RUN_ID: ${{ inputs.plan_artifact_run_id || steps.gate.outputs.plan_run_id }}
+        TFPR_SKIP_NOOP: ${{ inputs.skip_noop }}
         TFPR_LOCK_TIMEOUT: ${{ inputs.lock_timeout }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
         TFPR_GITHUB_TOKEN: ${{ inputs.token }}
