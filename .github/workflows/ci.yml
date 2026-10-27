@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: shellcheck
+        run: shellcheck bin/tfpr lib/*/*.sh test/run.sh test/fixtures/generate.sh
+      - name: actionlint
+        run: docker run --rm -v "${PWD}:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: test/run.sh
+
+  # Dogfood: plan the fixture stack with the local action so every PR gets a
+  # real plan comment. Fork PRs get a read-only token, so skip them.
+  dogfood:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # plan comment
+      actions: read # job-log link in the comment
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./plan
+        with:
+          stack: test/fixtures/stack
+          output_planfile: "true"
