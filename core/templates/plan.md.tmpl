@@ -1,27 +1,77 @@
-<details{{.Open}}>
-<summary>{{.Icon}} <b>Terraform Plan</b> — <code>{{.Stack}}</code> (<code>{{.Workspace}}</code>) — {{.Counts}}</summary>
+{{- /*
+The plan comment (and, expanded, the job summary). Every {{define}} block
+below can be replaced on its own: put a block of the same name in the file
+TFPR_TEMPLATE names. A top-level body in that file replaces this whole
+document instead. Blocks get a PlanView, except "unit", "resources" and
+"body", which get a UnitView (see core/render.go).
+*/ -}}
+{{template "header" .}}{{template "banner" .}}
+{{- if eq .Status "error"}}{{template "failed" .}}
+{{- else}}{{template "counts" .}}{{range .Units}}{{template "unit" .}}{{end}}{{template "outputs" .}}{{end -}}
+{{template "footer" .}}
 
-**Exit code:** `{{.ExitCode}}`  
-**Job:** [#{{.RunID}}]({{.JobURL}})
+{{- define "header" -}}
+### {{.Icon}} Terraform plan · {{code .Result.Target.Stack}} ({{code .Result.Target.Workspace}}) · {{.Headline}}
+{{end}}
 
-| Add | Change | Destroy | Replace | **Import** | Forget | Move | Outputs |
-|---|---|---|---|---|---|---|---|
-| {{.Stats.Creates}} | {{.Stats.Updates}} | {{.Stats.Destroys}} | {{.Stats.Replaces}} | **{{.Stats.Imports}}** | {{.Stats.Forgets}} | {{.Stats.Moves}} | {{.Stats.OutputChanges}} |
+{{- define "banner"}}{{with .Banner}}{{if .Show -}}
+{{if .Fallback}}> **Comment shortened**: the full layout does not fit here. Read the resource list and plan text in the full plan.
+{{end -}}
+{{if .Truncated}}> **Plan text truncated**: {{if .Shown}}showing {{.Shown}} of {{.Total}} {{.Measure}}{{else}}none of its {{.Total}} {{.Measure}} fit here{{end}}{{if gt .TruncatedUnits 1}} across {{.TruncatedUnits}} units{{end}}.{{if .ListComplete}} The resource list below is complete.{{end}}
+{{end -}}
+{{if .RiskUnlisted}}> **{{plural .RiskUnlisted "delete, replace or forget line"}} did not fit here.** Read them in the full plan before approving.
+{{else if not .ListComplete}}> **Resource list shortened**: every delete, replace and forget is listed; {{plural .Unlisted "lower-risk line"}} {{if eq .Unlisted 1}}is{{else}}are{{end}} counted, not listed.
+{{end -}}
+{{if or .Fallback .Truncated (not .ListComplete)}}{{template "links" $}}{{end -}}
+{{if .Forget}}> **{{plural .Forget "resource"}} will be forgotten**: removed from state, not destroyed; {{if eq .Forget 1}}it keeps{{else}}they keep{{end}} running, unmanaged.
+{{end -}}
+> Redaction: {{if eq .Redaction "filter"}}filter applied{{else}}no redaction filter configured{{end}}
+{{end}}{{end}}{{end}}
 
-{{if .DiffSummary}}<details{{.Open}}><summary>🚦 Diff summary</summary>
+{{- define "links"}}{{with .Links -}}
+> Full plan:{{if or .Summary .PlanText .Job}}{{with .Summary}} [job summary]({{.}}){{end}}{{if and .Summary .PlanText}} ·{{end}}{{with .PlanText}} [plan.txt]({{.}}){{end}}{{if and (or .Summary .PlanText) .Job}} ·{{end}}{{with .Job}} [job log]({{.}}){{end}}{{else}} the CI log of the run that planned it{{end}}
+{{end}}{{end}}
 
-```diff
-{{.DiffSummary}}
-```
+{{- define "failed"}}
+**Plan failed.** Any earlier plan for {{code .Result.Target.Stack}} is out of date; see {{with .Links.Job}}the [job log]({{.}}){{else}}the CI log{{end}}.
+{{with .Reason}}
+Reason: {{code .}}
+{{end}}{{end}}
 
-</details>
+{{- define "counts"}}{{if ne .Status "no_op"}}{{with .Counts}}
+| Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| {{.Create}} | {{.Update}} | {{.Delete}} | {{.Replace}} | {{.Import}} | {{.Move}} | {{.Forget}} | {{.Output}} | {{$.Drift}} |
+{{end}}{{if .Multi}}
+| Unit | Status | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+{{range .Units}}| {{code .Path}} | {{.Status}} | {{with .Counts}}{{.Create}} | {{.Update}} | {{.Delete}} | {{.Replace}} | {{.Import}} | {{.Move}} | {{.Forget}} | {{.Output}}{{end}} |
+{{end}}{{end}}{{end}}{{end}}
 
-{{end}}<details{{.Open}}><summary>⚙️ Full terraform plan output</summary>
+{{- define "unit"}}{{if .Multi}}
+#### {{.Icon}} {{code .Path}} · {{.Headline}}
+{{end}}{{template "resources" .}}{{template "body" .}}{{end}}
 
-```terraform
-{{.PlanText}}
-```
+{{- define "resources"}}{{if .ResourceLines}}
+**Resources ({{.ResourceLines}})**
+{{with .List}}{{fence $.ListLang .}}
+{{end}}{{range .Groups}}{{if .More}}{{if .Risky}}- **{{plural .More (printf "%s line" .Action)}} not listed**: no room here; see the full plan
+{{else}}+ {{.More}} more {{code .Action}} {{if eq .More 1}}line{{else}}lines{{end}}
+{{end}}{{end}}{{end}}{{end}}{{end}}
 
-</details>
+{{- define "body"}}{{if .Body}}
+{{$s := printf "Plan output for %s" .Label}}{{if .Truncated}}{{$s = printf "%s (truncated: %v of %v %s)" $s .Shown .Total .Measure}}{{end -}}
+{{details .Open $s (fence "terraform" .Body)}}
+{{else if .Omitted}}
+Plan text for {{code .Label}} does not fit here; see the full plan.
+{{end}}{{end}}
 
-</details>
+{{- define "outputs"}}{{with .Outputs}}
+Outputs: {{range $i, $o := .}}{{if $i}}, {{end}}{{code $o.Name}} ({{$o.Action}}{{if $o.Sensitive}}, sensitive{{end}}){{end}}{{with $.MoreOutputs}}, and {{.}} more{{end}}
+{{end}}{{end}}
+
+{{- define "footer"}}
+{{with .Result.Source.SHA}}Commit {{code (short .)}} · {{end}}{{with .Links.Job}}[job log]({{.}}) · {{end}}{{with .Links.Summary}}[full plan]({{.}}) · {{end}}tfpr {{or .Result.Tool.Version "dev"}}{{with .Result.Tool.BinaryVersion}} · {{$.Result.Tool.Binary}} {{.}}{{end}} · redaction: {{or .Result.Redaction.Mode "none"}}
+{{end}}
+
+{{- define "minimal"}}{{template "header" .}}{{template "banner" .}}{{template "counts" .}}{{template "footer" .}}{{end -}}

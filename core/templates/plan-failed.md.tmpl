@@ -1,8 +1,0 @@
-<details open>
-<summary>❌ <b>Terraform Plan failed</b> — <code>{{.Stack}}</code> (<code>{{.Workspace}}</code>)</summary>
-
-Plan failed for <code>{{.Stack}}</code>; see {{if .JobURL}}[#{{.RunID}}]({{.JobURL}}){{else}}the CI log{{end}}. Any earlier plan in this comment is out of date.
-
-{{if .Reason}}**Reason:** {{.Reason}}
-
-{{end}}</details>

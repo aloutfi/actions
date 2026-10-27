@@ -12,3 +12,4 @@ has_imports=false
 has_output_changes=false
 summary=1 to add, 1 to change, 1 to destroy, 1 to replace, 0 to import
 plan_artifact_name=tfplan-stack-default
+plan_text=stack/.tfpr/units/plan.txt

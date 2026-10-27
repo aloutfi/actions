@@ -1,16 +1,8 @@
 <!-- tf-plan:no-changes :: default -->
 <!-- tfpr:plan@1 {"key":"no-changes:default","sha":"","tree":"","exit":0,"status":"no_op","units":1,"apply":[],"provisional":[],"planset":"","fp":"sha256:8184102f7b0d377e6969414a59da60f234ce28eb5ce330487e29647de22d7718","run":"","attempt":0} -->
-<details>
-<summary>✅ <b>Terraform Plan</b> — <code>no-changes</code> (<code>default</code>) — No changes</summary>
+### ✅ Terraform plan · `no-changes` (`default`) · No changes
 
-**Exit code:** `0`  
-**Job:** [#1234](https://ci.example/run/1234/job/5678)
-
-| Add | Change | Destroy | Replace | **Import** | Forget | Move | Outputs |
-|---|---|---|---|---|---|---|---|
-| 0 | 0 | 0 | 0 | **0** | 0 | 0 | 0 |
-
-<details><summary>⚙️ Full terraform plan output</summary>
+<details><summary>Plan output for no-changes</summary>
 
 ```terraform
 
@@ -22,4 +14,4 @@ and found no differences, so no changes are needed.
 
 </details>
 
-</details>
+[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · tfpr dev · redaction: none

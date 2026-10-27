@@ -1,7 +1,9 @@
 package core
 
 import (
+	"compress/gzip"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -50,22 +52,37 @@ func TestDecidePlanSource(t *testing.T) {
 // fixtureUnit derives the "." unit from a render fixture.
 func fixtureUnit(t *testing.T, name string) Unit {
 	t.Helper()
-	read := func(f string) []byte {
-		data, err := os.ReadFile(filepath.Join("..", "test", "fixtures", "render", name, f))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return data
-	}
-	exit, err := strconv.Atoi(strings.TrimSpace(string(read("exit_code"))))
+	exit, err := strconv.Atoi(strings.TrimSpace(string(fixtureFile(t, name, "exit_code"))))
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, _, err := DeriveUnit(UnitInput{Path: ".", PlanJSON: read("plan.json"), PlanText: string(read("plan.txt")), ExitCode: &exit})
+	u, _, err := DeriveUnit(UnitInput{Path: ".", PlanJSON: fixtureFile(t, name, "plan.json"), PlanText: string(fixtureFile(t, name, "plan.txt")), ExitCode: &exit})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return u
+}
+
+// fixtureFile reads test/fixtures/render/<name>/<file>, or its gzipped
+// copy, <file>.gz (large fixtures).
+func fixtureFile(t *testing.T, name, file string) []byte {
+	t.Helper()
+	path := filepath.Join("..", "test", "fixtures", "render", name, file)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		var f *os.File
+		if f, err = os.Open(path + ".gz"); err == nil {
+			defer f.Close()
+			var z *gzip.Reader
+			if z, err = gzip.NewReader(f); err == nil {
+				data, err = io.ReadAll(z)
+			}
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestPlanStats(t *testing.T) {
@@ -100,53 +117,6 @@ func TestCleanStack(t *testing.T) {
 		if got := CleanStack(in); got != want {
 			t.Errorf("CleanStack(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-
-// TestRenderPlanGoldens renders each fixture the way test/run.sh does:
-// derive (no CI, no filter), then render.
-func TestRenderPlanGoldens(t *testing.T) {
-	dirs, err := filepath.Glob(filepath.Join("..", "test", "fixtures", "render", "*"))
-	if err != nil || len(dirs) == 0 {
-		t.Fatalf("no render fixtures (%v)", err)
-	}
-	for _, dir := range dirs {
-		name := filepath.Base(dir)
-		t.Run(name, func(t *testing.T) {
-			budget := 45000
-			if b, err := os.ReadFile(filepath.Join(dir, "budget")); err == nil {
-				budget, _ = strconv.Atoi(strings.TrimSpace(string(b)))
-			}
-			text, err := os.ReadFile(filepath.Join(dir, "plan.txt"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			r := NewPlanResult(PlanResult{Target: Target{Stack: name, Workspace: "default"}}, []Unit{fixtureUnit(t, name)})
-			got, err := RenderPlan(PlanComment{
-				Result: r, PlanText: text, Budget: budget,
-				RunID: "1234", JobURL: "https://ci.example/run/1234/job/5678",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			want, err := os.ReadFile(filepath.Join(dir, "expected.md"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			// The repo-host adapter puts the marker and record above the body.
-			got = PlanMarker(name, "default") + "\n" + Record(r) + "\n" + got
-			if got != string(want) {
-				t.Errorf("render differs from expected.md:\n%s", got)
-			}
-		})
-	}
-}
-
-func TestDiffSummary(t *testing.T) {
-	in := "x\n  # a will be created\n\t# b will be read during apply\n# c will be replaced, as requested\n  #no space\n  # d will be imported"
-	want := "+ a will be created\n~ b will be read during apply\n! c will be replaced, as requested\n+ d will be imported"
-	if got := DiffSummary([]byte(in)); got != want {
-		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
 }
 
@@ -210,7 +180,7 @@ func TestFailedUnit(t *testing.T) {
 	if r.Summary.Status != StatusError || r.Summary.ExitCode != 1 || r.Summary.Units.Error != 1 || r.Units[0].Skippable {
 		t.Errorf("summary %+v", r.Summary)
 	}
-	body, err := RenderPlan(PlanComment{Result: r, RunID: "7", JobURL: "https://ci.example/7"})
+	body, err := RenderPlan(PlanComment{Result: r, Host: HostFor("github"), Links: Links{Job: "https://ci.example/7"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,14 +188,15 @@ func TestFailedUnit(t *testing.T) {
 		t.Errorf("record: %s", Record(r))
 	}
 	for _, want := range []string{
-		"Plan failed for <code>infra</code>; see [#7](https://ci.example/7).",
-		"**Reason:** terraform plan exited 1",
+		"### ❌ Terraform plan · `infra` (`default`) · Plan failed\n",
+		"**Plan failed.** Any earlier plan for `infra` is out of date; see the [job log](https://ci.example/7).",
+		"Reason: `terraform plan exited 1`",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in\n%s", want, body)
 		}
 	}
-	body, _ = RenderPlan(PlanComment{Result: r})
+	body, _ = RenderPlan(PlanComment{Result: r, Host: HostFor("github")})
 	if !strings.Contains(body, "see the CI log.") {
 		t.Errorf("no run link: %s", body)
 	}
@@ -236,7 +207,7 @@ func TestFailedUnit(t *testing.T) {
 func TestBodyCannotForgeControlLines(t *testing.T) {
 	text := "  <!-- tf-plan:other :: default -->\n<!-- tfpr:plan@1 {\"status\":\"no_op\"} -->\n<!-- tf-apply:x :: y -->\nkeep <!-- tfpr: mid-line\n"
 	r := NewPlanResult(PlanResult{Target: Target{Stack: "s", Workspace: "w"}}, []Unit{{Path: ".", Status: StatusChanges, Counts: Counts{Create: 1}}})
-	body, err := RenderPlan(PlanComment{Result: r, PlanText: []byte(text), Budget: 1000})
+	body, err := RenderPlan(PlanComment{Result: r, Texts: map[string]string{".": text}, Host: HostFor("github")})
 	if err != nil {
 		t.Fatal(err)
 	}
