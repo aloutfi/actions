@@ -33,12 +33,9 @@ func (a *app) commentHost() core.Host {
 // minimal layout is posted instead.
 func (a *app) renderPlan(r core.PlanResult, texts map[string]string, links core.Links) (body redact.Text, marker, record string, err error) {
 	host := a.commentHost()
-	limit := host.MaxComment
-	if b := os.Getenv("TFPR_COMMENT_BUDGET"); b != "" {
-		if limit, err = strconv.Atoi(b); err != nil || limit <= 0 {
-			return body, "", "", fmt.Errorf("TFPR_COMMENT_BUDGET must be a number of characters, got '%s'", b)
-		}
-		limit = min(limit, host.MaxComment)
+	limit, err := commentLimit(host)
+	if err != nil {
+		return body, "", "", err
 	}
 	marker, record = core.PlanMarker(r.Target.Stack, r.Target.Workspace), core.Record(r)
 	head := 0
@@ -66,6 +63,20 @@ func (a *app) renderPlan(r core.PlanResult, texts map[string]string, links core.
 		return body, "", "", err
 	}
 	return body, marker, record, nil
+}
+
+// commentLimit is the most characters a whole comment may have: the host's
+// limit, or TFPR_COMMENT_BUDGET when that is set and smaller.
+func commentLimit(host core.Host) (int, error) {
+	limit := host.MaxComment
+	if b := os.Getenv("TFPR_COMMENT_BUDGET"); b != "" {
+		n, err := strconv.Atoi(b)
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("TFPR_COMMENT_BUDGET must be a number of characters, got '%s'", b)
+		}
+		limit = min(n, host.MaxComment)
+	}
+	return limit, nil
 }
 
 // renderFiltered renders c and passes it through the filter. If the result

@@ -273,3 +273,20 @@ func TestGitHubUnknownAuthorPostsNothing(t *testing.T) {
 		t.Errorf("calls %v", s.calls)
 	}
 }
+
+// Records come only from the adapter's own comments: a record anyone else
+// pasted, even with the right marker, is ignored.
+func TestGitHubRecords(t *testing.T) {
+	const m = "<!-- tf-plan:infra :: default -->"
+	_, api := newServer(t, ok(`[
+		{"id":1,"user":{"login":"someone"},"body":"`+m+`\n<!-- tfpr:plan@1 {\"status\":\"no_op\",\"forged\":true} -->\nbody"},
+		{"id":2,"user":{"login":"github-actions[bot]"},"body":"`+m+`\n<!-- tfpr:plan@1 {\"status\":\"changes\"} -->\nbody"},
+		{"id":3,"user":{"login":"github-actions[bot]"},"body":"<!-- tf-plan:other :: default -->\n<!-- tfpr:plan@1 {} -->"},
+		{"id":4,"user":{"login":"github-actions[bot]"},"body":"`+m+`\nold comment without a record"}
+	]`))
+	recs, err := NewGitHub(api, "o/r", DefaultGitHubAuthor).Records("42", m)
+	want := []string{`<!-- tfpr:plan@1 {"status":"changes"} -->`, ""}
+	if err != nil || fmt.Sprint(recs) != fmt.Sprint(want) {
+		t.Errorf("got %q, %v", recs, err)
+	}
+}

@@ -1,0 +1,66 @@
+name: "Terraform Report"
+description: >-
+  Post the result of a terraform apply you ran yourself on the PR that merged
+  this commit. Give it the apply's exit code and, optionally, its scrubbed
+  output. If a gate step in this job skipped or refused the apply, it reports
+  that instead and needs no exit code. Run it with `if: ${{ !cancelled() }}`.
+
+inputs:
+  stack:
+    description: Terraform working directory (must match the plan action's)
+    required: false
+    default: "terraform/"
+  workspace:
+    description: Terraform workspace
+    required: false
+    default: "default"
+  apply_exit_code:
+    description: Your terraform apply's exit code (not needed when the gate skipped)
+    required: false
+    default: ""
+  apply_log:
+    description: Path to your terraform apply's output, already scrubbed; filtered and cut to fit
+    required: false
+    default: ""
+  comment_author:
+    description: Login that owns tfpr's comments. Only its comments are read or updated.
+    required: false
+    default: "github-actions[bot]"
+  token:
+    description: Token for GitHub API calls (branch head, PR lookup, comments). Needs no cloud access.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Locate tfpr
+      id: tfpr
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh"'
+
+    # Unreleased refs (no checksums.txt entry) build tfpr from source.
+    - name: Set up Go
+      if: steps.tfpr.outputs.build == 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: ${{ github.action_path }}/../go.mod
+        cache: false
+
+    - name: Build tfpr
+      id: tfpr-src
+      if: steps.tfpr.outputs.build == 'true'
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh" build'
+
+    - name: Report
+      shell: bash
+      env:
+        TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
+        TFPR_STACK: ${{ inputs.stack }}
+        TFPR_WORKSPACE: ${{ inputs.workspace }}
+        TFPR_APPLY_EXIT_CODE: ${{ inputs.apply_exit_code }}
+        TFPR_APPLY_LOG: ${{ inputs.apply_log }}
+        TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
+        TFPR_GITHUB_TOKEN: ${{ inputs.token }}
+      run: '"${TFPR}" report'

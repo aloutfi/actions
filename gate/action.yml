@@ -1,0 +1,83 @@
+name: "Terraform Gate"
+description: >-
+  Decide, with only the GitHub token, whether a merge-time run applies, so a
+  later job holding cloud credentials can be skipped. A commit that is no
+  longer its branch's head is a clean skip (apply=false, exit 0): the run for
+  the newer head applies the newer tree. An unverifiable ref fails. With
+  skip_noop, a merge whose PR plan was a no-op is skipped too, but only when
+  every check passes. Writes decision.json to the stack's plan dir.
+
+inputs:
+  stack:
+    description: Terraform working directory (must match the plan action's)
+    required: false
+    default: "terraform/"
+  workspace:
+    description: Terraform workspace
+    required: false
+    default: "default"
+  skip_noop:
+    description: >-
+      Skip the apply when the PR's reviewed plan (tfpr's own comment record) was
+      a no-op and the merged tree is the tree that was planned
+    required: false
+    default: "false"
+  comment_author:
+    description: Login that owns tfpr's comments. Only its comments are read or updated.
+    required: false
+    default: "github-actions[bot]"
+  token:
+    description: Token for GitHub API calls (branch head, PR lookup, comments). Needs no cloud access.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  apply:
+    description: "'true' to apply, 'false' to skip (use it to skip the apply job)"
+    value: ${{ steps.gate.outputs.apply }}
+  action:
+    description: "'apply' | 'skip' | 'refuse'"
+    value: ${{ steps.gate.outputs.action }}
+  reason:
+    description: Why, e.g. 'superseded', 'no-op', 'unverified-ref', or why a no-op couldn't be skipped
+    value: ${{ steps.gate.outputs.reason }}
+  pr_number:
+    description: The PR that merged this commit, or empty
+    value: ${{ steps.gate.outputs.pr_number }}
+  plan_run_id:
+    description: The run that planned that PR, from tfpr's comment record, or empty
+    value: ${{ steps.gate.outputs.plan_run_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Locate tfpr
+      id: tfpr
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh"'
+
+    # Unreleased refs (no checksums.txt entry) build tfpr from source.
+    - name: Set up Go
+      if: steps.tfpr.outputs.build == 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: ${{ github.action_path }}/../go.mod
+        cache: false
+
+    - name: Build tfpr
+      id: tfpr-src
+      if: steps.tfpr.outputs.build == 'true'
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh" build'
+
+    - name: Gate
+      id: gate
+      shell: bash
+      env:
+        TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
+        TFPR_STACK: ${{ inputs.stack }}
+        TFPR_WORKSPACE: ${{ inputs.workspace }}
+        TFPR_SKIP_NOOP: ${{ inputs.skip_noop }}
+        TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
+        TFPR_GITHUB_TOKEN: ${{ inputs.token }}
+      run: '"${TFPR}" gate'

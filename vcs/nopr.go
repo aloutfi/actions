@@ -12,6 +12,9 @@ func (NoPR) UpsertComment(c Comment) (string, error) {
 	return "No repository host configured; skipping the comment on PR #" + c.PR + ".", nil
 }
 
+// Records finds none.
+func (NoPR) Records(string, string) ([]string, error) { return nil, nil }
+
 // PRsForCommit finds no PRs.
 func (NoPR) PRsForCommit(string, string) ([]PR, error) { return nil, nil }
 

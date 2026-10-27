@@ -1,5 +1,5 @@
 <!-- tf-plan:forget :: default -->
-<!-- tfpr:plan@1 {"key":"forget:default","sha":"","tree":"","exit":2,"status":"state_only","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:75cf4e944a9d5524cf19dc00dcda2cdeaae93924a247d9c08ef4ef1546ad5363","run":"","attempt":0} -->
+<!-- tfpr:plan@1 {"key":"forget:default","sha":"","head_sha":"","tree":"","exit":2,"status":"state_only","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:75cf4e944a9d5524cf19dc00dcda2cdeaae93924a247d9c08ef4ef1546ad5363","run":"","attempt":0} -->
 ### 🔀 Terraform plan · `forget` (`default`) · No infrastructure changes; state-only: 1 forgotten
 > **1 resource will be forgotten**: removed from state, not destroyed; it keeps running, unmanaged.
 > Redaction: no redaction filter configured

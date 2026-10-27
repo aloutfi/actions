@@ -123,18 +123,13 @@ func (z *Azure) UpsertComment(c Comment) (string, error) {
 	}
 	// If the listing fails, tfpr cannot know whether its thread exists, and
 	// creating one could duplicate it, so it gives up instead.
-	var threads struct {
-		Value []adoThread `json:"value"`
-	}
-	if _, err := z.api.Do(http.MethodGet, z.path("/pullRequests/%s/threads", url.PathEscape(c.PR)), nil, &threads); err != nil {
-		return "", fmt.Errorf("list threads on PR #%s: %w", c.PR, err)
+	own, err := z.own(c.PR, c.Marker, me)
+	if err != nil {
+		return "", err
 	}
 	var found *adoThread
-	for i, t := range threads.Value {
-		if !t.IsDeleted && t.prop(propMarker) == c.Marker && len(t.Comments) > 0 && t.Comments[0].Author.ID == me {
-			found = &threads.Value[i]
-			break
-		}
+	if len(own) > 0 {
+		found = &own[0]
 	}
 
 	props := map[string]typedValue{propMarker: str(c.Marker)}
@@ -180,6 +175,41 @@ func (z *Azure) UpsertComment(c Comment) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("Updated thread %d on PR #%s", found.ID, c.PR), nil
+}
+
+// own lists the threads on pr for marker whose first comment me wrote.
+func (z *Azure) own(pr, marker, me string) ([]adoThread, error) {
+	var threads struct {
+		Value []adoThread `json:"value"`
+	}
+	if _, err := z.api.Do(http.MethodGet, z.path("/pullRequests/%s/threads", url.PathEscape(pr)), nil, &threads); err != nil {
+		return nil, fmt.Errorf("list threads on PR #%s: %w", pr, err)
+	}
+	var own []adoThread
+	for _, t := range threads.Value {
+		if !t.IsDeleted && t.prop(propMarker) == marker && len(t.Comments) > 0 && t.Comments[0].Author.ID == me {
+			own = append(own, t)
+		}
+	}
+	return own, nil
+}
+
+// Records reads the record property of every thread of the build identity
+// for marker.
+func (z *Azure) Records(pr, marker string) ([]string, error) {
+	me, err := z.me()
+	if err != nil {
+		return nil, err
+	}
+	own, err := z.own(pr, marker, me)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]string, 0, len(own))
+	for _, t := range own {
+		records = append(records, t.prop(propRecord))
+	}
+	return records, nil
 }
 
 // status is the thread status to set ("" leaves it alone), and whether a

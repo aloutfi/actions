@@ -26,6 +26,9 @@ func newLocal(env Env, stdout, stderr io.Writer, _ *vcs.Client) CI {
 // or PR.
 func (l *Local) Context() Ctx { return Ctx{CI: "local"} }
 
+// RunFor knows no runs or commits.
+func (l *Local) RunFor(string) string { return "" }
+
 // JobURL is unknown.
 func (l *Local) JobURL() string { return "" }
 

@@ -153,6 +153,36 @@ func (g *GitHub) SummaryURL() string {
 	return runURL
 }
 
+// RunFor links to this workflow's run for sha (the Actions runs API,
+// filtered by head_sha), else to the commit. Without the workflow
+// (GITHUB_WORKFLOW_REF), any run for sha could be some other workflow's, so
+// it links the commit.
+func (g *GitHub) RunFor(sha string) string {
+	repo := g.env("GITHUB_REPOSITORY")
+	commit := g.env("GITHUB_SERVER_URL") + "/" + repo + "/commit/" + sha
+	// GITHUB_WORKFLOW_REF is owner/repo/<path>@<ref>; runs carry <path>.
+	workflow, _, _ := strings.Cut(strings.TrimPrefix(g.env("GITHUB_WORKFLOW_REF"), repo+"/"), "@")
+	if workflow == "" {
+		return commit
+	}
+	var runs struct {
+		WorkflowRuns []struct {
+			HTMLURL string `json:"html_url"`
+			Path    string `json:"path"`
+			HeadSHA string `json:"head_sha"`
+		} `json:"workflow_runs"`
+	}
+	q := url.Values{"head_sha": {sha}, "per_page": {"30"}}
+	if _, err := g.api.Do(http.MethodGet, "/repos/"+repo+"/actions/runs?"+q.Encode(), nil, &runs); err == nil {
+		for _, r := range runs.WorkflowRuns {
+			if r.HeadSHA == sha && r.Path == workflow && r.HTMLURL != "" {
+				return r.HTMLURL
+			}
+		}
+	}
+	return commit
+}
+
 // SetOutput appends name=value to $GITHUB_OUTPUT.
 func (g *GitHub) SetOutput(name, value string) error {
 	return appendOutput(g.env("GITHUB_OUTPUT"), name, value)
@@ -216,24 +246,4 @@ func (i *inert) Close() error {
 		fmt.Fprintf(g.out, "::%s::\n", g.token)
 	}
 	return nil
-}
-
-// FindPlanRun is the id of the newest successful run of workflow (a file
-// name) for headSHA in repo, or "". It queries GitHub Actions, so it lives
-// here rather than on the repo host; resolve-plan-run is its only caller.
-func (g *GitHub) FindPlanRun(repo, workflow, headSHA string) (string, error) {
-	var runs struct {
-		WorkflowRuns []struct {
-			ID int64 `json:"id"`
-		} `json:"workflow_runs"`
-	}
-	q := url.Values{"head_sha": {headSHA}, "status": {"success"}, "per_page": {"1"}}
-	path := fmt.Sprintf("/repos/%s/actions/workflows/%s/runs?%s", repo, url.PathEscape(workflow), q.Encode())
-	if _, err := g.api.Do(http.MethodGet, path, nil, &runs); err != nil {
-		return "", err
-	}
-	if len(runs.WorkflowRuns) == 0 {
-		return "", nil
-	}
-	return strconv.FormatInt(runs.WorkflowRuns[0].ID, 10), nil
 }

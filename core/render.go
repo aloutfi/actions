@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"text/template"
 )
@@ -656,37 +655,6 @@ func StripControlLines(body string) string {
 		}
 	}
 	return b.String()
-}
-
-// ApplyComment is everything the apply-result comment shows.
-type ApplyComment struct {
-	Stack, Workspace string
-	Decision         Decision // the plan source that ran, or none
-	ExitCode         int
-	UsedPlanfile     bool
-	Artifact         string // planfile artifact name; "" shows n/a
-	PlanRun          string // run that produced the planfile; "" is the current run
-	RunID, RunURL    string
-	SHA              string
-	TerraformVersion string
-}
-
-// RenderApply renders the human-readable part of the apply-result comment;
-// the adapter prepends the marker (ApplyMarker) unfiltered.
-func RenderApply(c ApplyComment) (string, error) {
-	view := struct {
-		ApplyComment
-		Icon, Status, SourceLine, Reason string
-	}{ApplyComment: c, Reason: c.Decision.Reason}
-
-	view.Icon, view.Status = "✅", "succeeded"
-	if c.ExitCode != 0 {
-		view.Icon, view.Status = "❌", "failed (exit "+strconv.Itoa(c.ExitCode)+")"
-	}
-
-	view.SourceLine = DescribeDecision(c.Decision, 0, "", c.PlanRun).Source
-	body, err := execute(templates, "apply.md.tmpl", view)
-	return StripControlLines(body), err
 }
 
 func execute(t *template.Template, name string, data any) (string, error) {

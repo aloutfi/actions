@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,10 +22,11 @@ import (
 type Azure struct {
 	env Env
 	out io.Writer
+	api *vcs.Client // the collection's REST API
 }
 
-func newAzure(env Env, stdout, stderr io.Writer, _ *vcs.Client) CI {
-	a := &Azure{env: env, out: stdout}
+func newAzure(env Env, stdout, stderr io.Writer, api *vcs.Client) CI {
+	a := &Azure{env: env, out: stdout, api: api}
 	// Which commits a PR build sees is an open verification item: log both.
 	// stderr, because some commands' stdout is data.
 	if head, merge := env("SYSTEM_PULLREQUEST_SOURCECOMMITID"), env("BUILD_SOURCEVERSION"); head != "" {
@@ -51,6 +53,7 @@ func (a *Azure) Context() Ctx {
 		Ref:     e("BUILD_SOURCEBRANCH"),
 		Actor:   e("BUILD_REQUESTEDFOR"),
 		Attempt: attempt,
+		CIAPI:   e("SYSTEM_COLLECTIONURI"),
 	}
 	c.HeadSHA = e("SYSTEM_PULLREQUEST_SOURCECOMMITID")
 	switch e("BUILD_REPOSITORY_PROVIDER") {
@@ -90,6 +93,39 @@ func (a *Azure) JobURL() string {
 		u += "&view=logs&j=" + url.QueryEscape(j)
 	}
 	return u
+}
+
+// RunFor links to this pipeline's build of sha on this branch (the builds
+// API has no commit filter, so tfpr lists the definition's latest builds
+// and matches sourceVersion), else to the commit.
+func (a *Azure) RunFor(sha string) string {
+	e := a.env
+	if def := e("SYSTEM_DEFINITIONID"); a.api != nil && a.api.BaseURL != "" && def != "" {
+		var builds struct {
+			Value []struct {
+				SourceVersion string `json:"sourceVersion"`
+				Links         struct {
+					Web struct {
+						Href string `json:"href"`
+					} `json:"web"`
+				} `json:"_links"`
+			} `json:"value"`
+		}
+		q := url.Values{"definitions": {def}, "branchName": {e("BUILD_SOURCEBRANCH")},
+			"queryOrder": {"queueTimeDescending"}, "$top": {"50"}, "api-version": {"7.1"}}
+		path := "/" + url.PathEscape(e("SYSTEM_TEAMPROJECT")) + "/_apis/build/builds?" + q.Encode()
+		if _, err := a.api.Do(http.MethodGet, path, nil, &builds); err == nil {
+			for _, b := range builds.Value {
+				if b.SourceVersion == sha && b.Links.Web.Href != "" {
+					return b.Links.Web.Href
+				}
+			}
+		}
+	}
+	if uri := e("BUILD_REPOSITORY_URI"); uri != "" {
+		return strings.TrimSuffix(uri, ".git") + "/commit/" + sha
+	}
+	return ""
 }
 
 // SetOutput sets an output variable that later jobs and stages can read

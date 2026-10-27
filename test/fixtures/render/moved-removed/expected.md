@@ -1,5 +1,5 @@
 <!-- tf-plan:moved-removed :: default -->
-<!-- tfpr:plan@1 {"key":"moved-removed:default","sha":"","tree":"","exit":2,"status":"state_only","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:8773ec38e9b8ff68a5f9b9820671d5b1d51204f72c3e74ac6fea3a9d6b60bacd","run":"","attempt":0} -->
+<!-- tfpr:plan@1 {"key":"moved-removed:default","sha":"","head_sha":"","tree":"","exit":2,"status":"state_only","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:8773ec38e9b8ff68a5f9b9820671d5b1d51204f72c3e74ac6fea3a9d6b60bacd","run":"","attempt":0} -->
 ### 🔀 Terraform plan · `moved-removed` (`default`) · No infrastructure changes; state-only: 1 moved, 2 forgotten
 > **2 resources will be forgotten**: removed from state, not destroyed; they keep running, unmanaged.
 > Redaction: no redaction filter configured

@@ -166,7 +166,7 @@ func TestNewPlanResultAndRecord(t *testing.T) {
 		t.Errorf("planset %+v", r.Planset)
 	}
 	rec := Record(r)
-	want := `<!-- tfpr:plan@1 {"key":"stacks-net:prod","sha":"abc","tree":"def","exit":2,"status":"changes","units":2,` +
+	want := `<!-- tfpr:plan@1 {"key":"stacks-net:prod","sha":"abc","head_sha":"","tree":"def","exit":2,"status":"changes","units":2,` +
 		`"apply":["a"],"provisional":["a"],"planset":"sha256:` + r.Planset.SHA256 + `","fp":"` +
 		Fingerprint("a sha256:1\nz sha256:2\n") + `","run":"9","attempt":1} -->`
 	if rec != want {
@@ -209,7 +209,7 @@ func TestRecordCarriesNothingSensitive(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(rec, "<!-- tfpr:plan@1 "), " -->")), &fields); err != nil {
 		t.Fatal(err)
 	}
-	allowed := "key sha tree exit status units apply provisional planset fp run attempt"
+	allowed := "key sha head_sha tree exit status units apply provisional planset fp run attempt"
 	for k := range fields {
 		if !strings.Contains(" "+allowed+" ", " "+k+" ") {
 			t.Errorf("record field %q is not on the allow list", k)

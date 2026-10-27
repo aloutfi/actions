@@ -160,8 +160,8 @@ func TestSupersededGuard(t *testing.T) {
 		msg     string
 	}{
 		{"branch head", "refs/heads/main", 1, heads("abc", nil), GuardOK, "", "is the head of 'main'"},
-		{"branch moved", "refs/heads/main", 1, heads("def", nil), GuardSuperseded, "error", "commit abc is no longer the head of 'main' (now def)"},
-		{"re-run, branch moved", "refs/heads/main", 2, heads("def", nil), GuardSuperseded, "error", "(attempt=2)"},
+		{"branch moved", "refs/heads/main", 1, heads("def", nil), GuardSuperseded, "warning", "commit abc is no longer the head of 'main' (now def)"},
+		{"re-run, branch moved", "refs/heads/main", 2, heads("def", nil), GuardSuperseded, "warning", "(attempt=2)"},
 		{"head lookup fails", "refs/heads/main", 1, heads("", errors.New("boom")), GuardUnverified, "error", "could not read the head of 'main'"},
 		{"tag, first attempt", "refs/tags/v1", 1, nil, GuardOK, "warning", "non-branch ref 'refs/tags/v1'"},
 		{"tag, re-run", "refs/tags/v1", 2, nil, GuardUnverified, "error", "Re-run apply refused"},
@@ -218,5 +218,25 @@ func TestBodyCannotForgeControlLines(t *testing.T) {
 	}
 	if !strings.Contains(body, "keep <!-- tfpr: mid-line") {
 		t.Errorf("stripped too much:\n%s", body)
+	}
+}
+
+// The footer leads with the commit reviewers know, the PR head; the merge
+// commit that was planned comes second.
+func TestFooterShowsPRHead(t *testing.T) {
+	for _, c := range []struct{ sha, head, want string }{
+		{"7c79a8b1234", "ac9f6121234", "Commit `ac9f612` (planned as merge `7c79a8b`) · "},
+		{"7c79a8b1234", "", "Commit `7c79a8b` · "},
+		{"7c79a8b1234", "7c79a8b1234", "Commit `7c79a8b` · "},
+	} {
+		r := NewPlanResult(PlanResult{Target: Target{Stack: "s", Workspace: "w"}, Source: Source{SHA: c.sha, HeadSHA: c.head}},
+			[]Unit{{Path: ".", Status: StatusNoOp, Skippable: true}})
+		body, err := RenderPlan(PlanComment{Result: r, Host: HostFor("github"), Texts: map[string]string{".": "No changes.\n"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(body, c.want) {
+			t.Errorf("sha %s head %q: want %q in\n%s", c.sha, c.head, c.want, body)
+		}
 	}
 }

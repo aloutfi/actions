@@ -3,7 +3,10 @@ package ci
 import (
 	"bufio"
 	"bytes"
+	"github.com/aloutfi/actions/vcs"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +42,7 @@ func TestDetectSnapshots(t *testing.T) {
 		"github-and-tf-build": "github",
 		"local":               "local",
 	} {
-		got := Detect(snapshot(t, name), io.Discard, io.Discard, nil).Context().CI
+		got := Detect(snapshot(t, name), io.Discard, io.Discard, APIs{}).Context().CI
 		if got != want {
 			t.Errorf("%s: detected %s, want %s", name, got, want)
 		}
@@ -49,7 +52,7 @@ func TestDetectSnapshots(t *testing.T) {
 func TestAzureContext(t *testing.T) {
 	for name, want := range map[string]Ctx{
 		"azure-pr-tfsgit": {
-			CI: "azure", RunID: "812",
+			CI: "azure", RunID: "812", CIAPI: "https://dev.azure.example/org/",
 			RunURL:  "https://dev.azure.example/org/Platform%20Team/_build/results?buildId=812",
 			SHA:     "feedfeedfeedfeedfeedfeedfeedfeedfeedfeed", // the merge commit checked out
 			HeadSHA: "abcabcabcabcabcabcabcabcabcabcabcabcabca", // the PR head
@@ -58,7 +61,7 @@ func TestAzureContext(t *testing.T) {
 			VCS:  "azure", VCSURL: "https://dev.azure.example/org/",
 		},
 		"azure-pr-github": {
-			CI: "azure", RunID: "813",
+			CI: "azure", RunID: "813", CIAPI: "https://dev.azure.example/org/",
 			RunURL:  "https://dev.azure.example/org/proj/_build/results?buildId=813",
 			SHA:     "feedfeedfeedfeedfeedfeedfeedfeedfeedfeed",
 			HeadSHA: "abcabcabcabcabcabcabcabcabcabcabcabcabca",
@@ -66,7 +69,7 @@ func TestAzureContext(t *testing.T) {
 			Repo: "o/r", VCS: "github",
 		},
 		"azure-main-tfsgit": {
-			CI: "azure", RunID: "814",
+			CI: "azure", RunID: "814", CIAPI: "https://dev.azure.example/org/",
 			RunURL: "https://dev.azure.example/org/proj/_build/results?buildId=814",
 			SHA:    "feedfeedfeedfeedfeedfeedfeedfeedfeedfeed", Ref: "refs/heads/main", Attempt: 1,
 			Repo: "99999999-8888-7777-6666-555555555555/11111111-2222-3333-4444-555555555555",
@@ -185,5 +188,31 @@ func TestAzureInert(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "##vso[") || strings.Contains(out.String(), "##[") {
 		t.Error("a command survived")
+	}
+}
+
+func TestAzureRunFor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.URL.Path != "/org/proj/_apis/build/builds" || q.Get("definitions") != "12" || q.Get("branchName") != "refs/heads/main" {
+			http.NotFound(w, r)
+			return
+		}
+		io.WriteString(w, `{"value":[
+			{"sourceVersion":"abc","_links":{"web":{"href":"https://dev.azure.example/org/proj/_build/results?buildId=9"}}},
+			{"sourceVersion":"def","_links":{"web":{"href":"https://dev.azure.example/org/proj/_build/results?buildId=10"}}}]}`)
+	}))
+	defer srv.Close()
+	env := map[string]string{"SYSTEM_DEFINITIONID": "12", "SYSTEM_TEAMPROJECT": "proj", "BUILD_SOURCEBRANCH": "refs/heads/main",
+		"BUILD_REPOSITORY_URI": "https://dev.azure.example/org/proj/_git/infra"}
+	a := newAzure(envOf(env), io.Discard, io.Discard, vcs.NewAzureClient(srv.URL+"/org/", "t"))
+	if got := a.RunFor("def"); got != "https://dev.azure.example/org/proj/_build/results?buildId=10" {
+		t.Errorf("build: %s", got)
+	}
+	if got := a.RunFor("nope"); got != "https://dev.azure.example/org/proj/_git/infra/commit/nope" {
+		t.Errorf("no build: %s", got)
+	}
+	if got := newAzure(envOf(nil), io.Discard, io.Discard, nil).RunFor("x"); got != "" {
+		t.Errorf("nothing known: %s", got)
 	}
 }

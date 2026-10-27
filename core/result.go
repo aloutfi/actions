@@ -477,6 +477,48 @@ func sha256Hex(s string) string {
 // recordLimit is the longest record line before "apply" collapses to "all".
 const recordLimit = 8000
 
+// RecordData is the comment record's content.
+type RecordData struct {
+	Key         string   `json:"key"`
+	SHA         string   `json:"sha"`      // the commit planned (on PR builds, the merge commit)
+	HeadSHA     string   `json:"head_sha"` // the PR head it was planned for
+	Tree        string   `json:"tree"`
+	Exit        int      `json:"exit"`
+	Status      string   `json:"status"`
+	Units       int      `json:"units"`
+	Apply       any      `json:"apply"` // unit paths still to apply, or "all"
+	Provisional []string `json:"provisional"`
+	Planset     string   `json:"planset"`
+	FP          string   `json:"fp"`
+	Run         string   `json:"run"`
+	Attempt     int      `json:"attempt"`
+}
+
+const recordPrefix, recordSuffix = "<!-- tfpr:plan@1 ", " -->"
+
+// ParseRecord reads a record line back. Records of the same major version
+// (plan@1) may carry fields this version doesn't know, since fields are
+// only ever added within a major; those are ignored. Another major, or
+// anything that isn't exactly one record, is an error.
+func ParseRecord(line string) (RecordData, error) {
+	var rec RecordData
+	rest, ok := strings.CutPrefix(strings.TrimSpace(line), "<!-- tfpr:plan@")
+	if !ok {
+		return rec, errors.New("not a tfpr plan record")
+	}
+	major, rest, _ := strings.Cut(rest, " ")
+	if major != "1" {
+		return rec, fmt.Errorf("unsupported tfpr plan record version plan@%s", major)
+	}
+	if body, ok := strings.CutSuffix(rest, recordSuffix); ok {
+		dec := json.NewDecoder(strings.NewReader(body))
+		if err := dec.Decode(&rec); err == nil && !dec.More() {
+			return rec, nil
+		}
+	}
+	return rec, errors.New("not a tfpr plan record")
+}
+
 // Record is the comment record: one hidden line that a later stage (the
 // merge-time gate) reads back from the bot's own comment.
 func Record(r PlanResult) string {
@@ -493,20 +535,7 @@ func Record(r PlanResult) string {
 	if r.Planset != nil {
 		planset = "sha256:" + r.Planset.SHA256
 	}
-	rec := struct {
-		Key         string   `json:"key"`
-		SHA         string   `json:"sha"`
-		Tree        string   `json:"tree"`
-		Exit        int      `json:"exit"`
-		Status      string   `json:"status"`
-		Units       int      `json:"units"`
-		Apply       any      `json:"apply"`
-		Provisional []string `json:"provisional"`
-		Planset     string   `json:"planset"`
-		FP          string   `json:"fp"`
-		Run         string   `json:"run"`
-		Attempt     int      `json:"attempt"`
-	}{r.Target.Key, r.Source.SHA, r.Source.Tree, r.Summary.ExitCode, r.Summary.Status, len(r.Units),
+	rec := RecordData{r.Target.Key, r.Source.SHA, r.Source.HeadSHA, r.Source.Tree, r.Summary.ExitCode, r.Summary.Status, len(r.Units),
 		apply, provisional, planset, RunFingerprint(r), r.Run.ID, r.Run.Attempt}
 	line := recordLine(rec)
 	if len(line) > recordLimit {
@@ -529,5 +558,5 @@ func RunFingerprint(r PlanResult) string {
 // recordLine marshals with HTML escaping on, so no "-->" can end the comment early.
 func recordLine(rec any) string {
 	data, _ := json.Marshal(rec)
-	return "<!-- tfpr:plan@1 " + string(data) + " -->"
+	return recordPrefix + string(data) + recordSuffix
 }
