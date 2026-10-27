@@ -333,3 +333,25 @@ func TestMinimalFailedPlan(t *testing.T) {
 		t.Errorf("counts table in a failed plan:\n%s", got)
 	}
 }
+
+// Once a line does not fit, nothing lower-risk is listed after it, even a
+// shorter line that would fit: the list stays in strict risk order.
+func TestAllocateKeepsStrictRiskOrder(t *testing.T) {
+	var res []Resource
+	for i := range 5 {
+		res = append(res, Resource{Address: fmt.Sprintf("module.%s.terraform_data.u[%d]", strings.Repeat("long", 20), i), Action: "update"})
+		res = append(res, Resource{Address: fmt.Sprintf("c.x[%d]", i), Action: "create"})
+	}
+	r := NewPlanResult(PlanResult{Target: Target{Stack: "s", Workspace: "w"}}, []Unit{{Path: ".", Status: StatusChanges, Resources: res}})
+	v := newView(PlanComment{Result: r, Host: HostFor("github")}, layout{measure: inRunes})
+	update, create := v.Units[0].group("update"), v.Units[0].group("create")
+	line := func(g *Group) int { return inRunes.of(g.lines[0]) + 1 }
+	if line(create) >= line(update) {
+		t.Fatalf("create lines (%d) must be shorter than update lines (%d) for this test", line(create), line(update))
+	}
+	// Room for two updates and one create line, but not a third update.
+	v.allocate(2*line(update)+line(create), 1<<20, inRunes)
+	if update.Listed != 2 || create.Listed != 0 {
+		t.Errorf("listed %d updates and %d creates, want 2 and 0", update.Listed, create.Listed)
+	}
+}

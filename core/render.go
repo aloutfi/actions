@@ -411,7 +411,8 @@ func fit(t *template.Template, v *PlanView, l layout) (string, error) {
 
 // allocate chooses the listed resource lines. Delete, replace and forget
 // groups are listed whole, in risk order, while they fit room. Other lines
-// follow in risk order while the whole list stays within share (and room).
+// follow in strict risk order until the first one that would take the whole
+// list past share (or room).
 func (v *PlanView) allocate(share, room int, m measure) {
 	used := 0
 	cost := func(line string) int { return m.of(line) + 1 }
@@ -430,7 +431,10 @@ func (v *PlanView) allocate(share, room int, m measure) {
 			}
 		}
 	}
+	// The first line that does not fit ends the list, so a shorter
+	// lower-risk line never follows a higher-risk line left out.
 	limit := min(share, room)
+lower:
 	for _, rk := range riskOrder {
 		for _, u := range v.Units {
 			g := u.group(rk.action)
@@ -439,7 +443,7 @@ func (v *PlanView) allocate(share, room int, m measure) {
 			}
 			for _, line := range g.lines {
 				if used+cost(line) > limit {
-					break
+					break lower
 				}
 				used += cost(line)
 				g.Listed++
