@@ -69,5 +69,16 @@ assert_eq "artifact name default stack" "tfplan-terraform-default" "$(artifact_n
 assert_eq "artifact name nested stack" "tfplan-stacks-net-core-prod" "$(artifact_name ./stacks/net.core/ prod)"
 assert_eq "artifact name empty workspace" "tfplan-infra-default" "$(artifact_name infra '')"
 
+# --- action wrappers (static checks) ----------------------------------------
+# assert_yaml NAME FILE LINE: FILE contains LINE (whitespace-trimmed) verbatim.
+# LINE is literal GitHub expression text, so callers single-quote it.
+assert_yaml() {
+  if sed 's/^[[:space:]]*//' "${root}/$2" | grep -qxF "$3"; then pass; else fail "$1: '$3' not in $2"; fi
+}
+# A blank plan_artifact_run_id must mean the current run, not an empty run-id.
+# shellcheck disable=SC2016
+assert_yaml "apply run-id falls back to current run" apply/action.yml \
+  'run-id: ${{ inputs.plan_artifact_run_id || github.run_id }}'
+
 echo "${passes} passed, ${failures} failed"
 [[ "${failures}" -eq 0 ]]
