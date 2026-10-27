@@ -187,7 +187,7 @@ func RenderPlan(c PlanComment) (string, error) {
 		l.budget = c.Host.MaxComment
 	}
 	t := templates
-	if c.Template != "" {
+	if c.Template != "" && !c.Minimal { // the minimal layout is always the built-in one
 		var err error
 		if t, err = withUser(c.Template); err != nil {
 			return "", err

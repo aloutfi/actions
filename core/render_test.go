@@ -379,3 +379,12 @@ func TestErrorStatusBannerMatchesTheBody(t *testing.T) {
 		}
 	}
 }
+
+// The minimal layout is always the built-in one, so a minimal render does
+// not parse the user template at all.
+func TestMinimalDoesNotParseTheUserTemplate(t *testing.T) {
+	r := NewPlanResult(PlanResult{Target: Target{Stack: "s", Workspace: "w"}}, []Unit{fixtureUnit(t, "changes")})
+	if _, err := RenderPlan(PlanComment{Result: r, Host: HostFor("github"), Template: "{{define", Minimal: true}); err != nil {
+		t.Errorf("parsed the user template: %v", err)
+	}
+}
