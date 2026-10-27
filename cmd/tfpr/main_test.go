@@ -259,6 +259,27 @@ func TestPlanError(t *testing.T) {
 	lacks(t, "no show", r.tf, "terraform show")
 }
 
+// A relative TFPR_TF_BIN is relative to where tfpr runs, not to the stack,
+// and a bare name is looked up on PATH; every call uses the same executable.
+func TestTerraformBinResolution(t *testing.T) {
+	s := newScenario(t).set("FAKE_TF_PLAN", filepath.Join(root, "test", "fixtures", "render", "no-changes"))
+	stub, err := os.ReadFile(s.env["TFPR_TF_BIN"])
+	must(t, err)
+	must(t, os.MkdirAll(filepath.Join(s.ws, "tools"), 0o755))
+	must(t, os.WriteFile(filepath.Join(s.ws, "tools", "terraform"), stub, 0o755))
+
+	s.env["TFPR_TF_BIN"] = "tools/terraform"
+	r := s.run("plan")
+	eq(t, "relative path: exit code", 0, r.rc)
+	has(t, "relative path: version lookup", r.tf, "terraform version -json")
+	meta, _ := os.ReadFile(filepath.Join(s.ws, "stack", "plan-metadata.json"))
+	has(t, "relative path: version recorded", string(meta), `"terraform_version": "0.0.0"`)
+
+	s.env["TFPR_TF_BIN"] = ""
+	s.env["PATH"] = filepath.Join(s.ws, "tools") + string(os.PathListSeparator) + os.Getenv("PATH")
+	eq(t, "bare name on PATH: exit code", 0, s.run("plan").rc)
+}
+
 func TestPlanUsesTerraformBin(t *testing.T) {
 	s := newScenario(t)
 	s.env["TFPR_TF_BIN"] = filepath.Join(s.ws, "missing-terraform")

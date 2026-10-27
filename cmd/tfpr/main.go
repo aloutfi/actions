@@ -68,7 +68,9 @@ type app struct {
 	stdout, stderr   io.Writer
 	stack, workspace string
 	api              *vcs.Client
-	ci               ci.CI // nil until loadCI
+	tfBin            string // resolved terraform executable
+	tfErr            error  // why tfBin could not be resolved
+	ci               ci.CI  // nil until loadCI
 	ctx              ci.Ctx
 }
 
@@ -80,6 +82,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		workspace: envOr("TFPR_WORKSPACE", "default"),
 		api:       vcs.NewGitHubClient(os.Getenv("GITHUB_API_URL"), githubToken()),
 	}
+	a.tfBin, a.tfErr = resolveExecutable(envOr("TFPR_TF_BIN", "terraform"))
 	commands := map[string]func() error{
 		"plan":             a.plan,
 		"render":           a.render,
@@ -155,7 +158,10 @@ func (a *app) outputs(fields ...core.Field) error {
 // from its environment. Every terraform call goes through here. A non-zero
 // exit becomes an exitCode carrying terraform's status.
 func (a *app) terraform(dir string, stdout, stderr io.Writer, args ...string) error {
-	cmd := exec.Command(envOr("TFPR_TF_BIN", "terraform"), args...)
+	if a.tfErr != nil {
+		return a.tfErr
+	}
+	cmd := exec.Command(a.tfBin, args...)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, stdout, stderr
 	cmd.Env = terraformEnv(os.Environ())
 	err := cmd.Run()
@@ -548,6 +554,16 @@ func (a *app) resolvePlanRun() error {
 		}
 	}
 	return a.outputs(core.Field{Name: "run_id", Value: runID}, core.Field{Name: "pr_number", Value: prNum})
+}
+
+// resolveExecutable turns name into a path that does not depend on the
+// directory terraform runs in: a bare name is looked up on PATH, and a path is
+// made absolute against tfpr's working directory.
+func resolveExecutable(name string) (string, error) {
+	if !strings.ContainsAny(name, `/\`) {
+		return exec.LookPath(name)
+	}
+	return filepath.Abs(name)
 }
 
 // terraformEnv is env without any TFPR_* variable.
