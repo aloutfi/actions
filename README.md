@@ -150,8 +150,10 @@ terraform -chdir=infra show -json tfplan > plan.json             # stdout only; 
 terraform -chdir=infra show -no-color tfplan | ./scrub > plan.txt
 
 # Step 2: the repo host token only (here a GitHub token), no cloud credentials.
-# Run it even when step 1 failed (always()), so a failed plan replaces the
-# last good one on the PR.
+# Run it even when step 1 failed, so a failed plan replaces the last good one
+# on the PR, but not when the run was cancelled: a cancelled run may have been
+# superseded by a newer, good plan. GitHub Actions: if: ${{ !cancelled() }}.
+# Azure Pipelines: condition: not(canceled()).
 export TFPR_STACK=infra TFPR_FILTER=./scrub
 failed=0
 TFPR_PLAN_JSON=plan.json TFPR_PLAN_TXT=plan.txt TFPR_EXIT_CODE="$(cat plan.exitcode 2>/dev/null)" \
@@ -175,7 +177,10 @@ exit "$failed"
   comment, so the last good plan never stands as if current. If there is no
   plan dir at all, `comment` records and posts the failure itself, then exits
   non-zero. `tfpr plan` does the same when terraform fails, and the plan
-  action's comment step runs with `always()`.
+  action's comment step runs unless the run was cancelled (`!cancelled()`).
+  Use the same condition for your own comment step (`not(canceled())` on
+  Azure Pipelines). Never use "always", which also posts "plan failed" from
+  a cancelled run over a newer good plan.
 - If the two steps run in different jobs, run `derive` in step 1 and hand over
   only the plan dir (below), never `plan.json`.
 - `derive` and `render` work anywhere. `comment` needs a pull request from a

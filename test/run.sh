@@ -240,8 +240,8 @@ assert_eq "plan retention_days default" 'default: "7"' \
   "$(grep -A6 '^  retention_days:' "${root}/plan/action.yml" | grep -m1 'default:' | sed 's/^ *//')"
 
 # shellcheck disable=SC2016
-assert_yaml "the plan comment runs when the plan failed" plan/action.yml \
-  "if: always() && github.event_name == 'pull_request'"
+assert_yaml "the plan comment runs when the plan failed, not when cancelled" plan/action.yml \
+  "if: \${{ !cancelled() && github.event_name == 'pull_request' }}"
 
 # shellcheck disable=SC2016
 assert_yaml "apply downloads outside the stack" apply/action.yml \

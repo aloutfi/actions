@@ -106,9 +106,10 @@ runs:
         if-no-files-found: error
 
     # Runs even when the plan failed: tfpr plan records the failure, and the
-    # comment replaces the last good plan with "plan failed".
+    # comment replaces the last good plan with "plan failed". Not on a
+    # cancelled run, which may have been superseded by a newer, good plan.
     - name: Upsert PR comment
-      if: always() && github.event_name == 'pull_request'
+      if: ${{ !cancelled() && github.event_name == 'pull_request' }}
       shell: bash
       env:
         TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
