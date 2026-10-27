@@ -123,6 +123,7 @@ type app struct {
 	stdout, stderr   io.Writer
 	stack, workspace string
 	api              *vcs.Client // the one GitHub client
+	ado              *vcs.Client // the one Azure DevOps client
 	apiErr           error       // why its base URL is unknown
 	filter           redact.Filter
 	tfBin            string // resolved terraform executable
@@ -182,16 +183,17 @@ func (a *app) exit(err error) int {
 	return 1
 }
 
-// loadCI detects the CI and builds the one GitHub REST client that both the
-// CI adapter (job links) and the repo-host adapter use. Its base URL is
-// settled once the CI says where GitHub is.
+// loadCI detects the CI and builds the one GitHub and the one Azure DevOps
+// REST client that both the CI adapter (job and run links) and the repo-host
+// adapter use. Their base URLs are settled once the CI says where they are.
 func (a *app) loadCI() {
-	a.api = &vcs.Client{}
-	a.ci = ci.Detect(os.Getenv, a.stdout, a.stderr, a.api)
+	a.api, a.ado = &vcs.Client{}, &vcs.Client{}
+	a.ci = ci.Detect(os.Getenv, a.stdout, a.stderr, ci.APIs{GitHub: a.api, Azure: a.ado})
 	a.ctx = a.ci.Context()
 	var base string
 	base, a.apiErr = githubAPIURL(a.ctx) // on error base is "": every request fails
 	*a.api = *vcs.NewGitHubClient(base, githubToken())
+	*a.ado = *vcs.NewAzureClient(a.ctx.CIAPI, os.Getenv("TFPR_ADO_TOKEN"))
 }
 
 // githubAPIURL is the GitHub API to use: TFPR_GITHUB_API_URL, else what the
@@ -227,7 +229,7 @@ func (a *app) loadVCS() (vcs.VCS, error) {
 		cfg.Author = vcs.DefaultGitHubAuthor
 	}
 	if cfg.Name == "azure" {
-		cfg.URL, cfg.Token = a.ctx.VCSURL, os.Getenv("TFPR_ADO_TOKEN")
+		cfg.Azure = a.ado
 	} else {
 		if a.apiErr != nil && cfg.Name != "none" {
 			return nil, a.apiErr

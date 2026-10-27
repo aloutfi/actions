@@ -25,7 +25,7 @@ func TestDetect(t *testing.T) {
 		{map[string]string{"GITHUB_ACTIONS": "false"}, "*ci.Local"},
 		{map[string]string{}, "*ci.Local"},
 	} {
-		got := Detect(envOf(c.env), io.Discard, io.Discard, nil)
+		got := Detect(envOf(c.env), io.Discard, io.Discard, APIs{})
 		if name := typeName(got); name != c.want {
 			t.Errorf("%v: got %s, want %s", c.env, name, c.want)
 		}
@@ -212,5 +212,27 @@ func TestLocalInertPassesThrough(t *testing.T) {
 	w.Close()
 	if out.String() != "::x::" {
 		t.Errorf("got %q", out.String())
+	}
+}
+
+// RunFor finds this workflow's run for a commit, else links the commit.
+func TestGitHubRunFor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/actions/runs" || r.URL.Query().Get("head_sha") != "def" {
+			io.WriteString(w, `{"workflow_runs":[]}`)
+			return
+		}
+		io.WriteString(w, `{"workflow_runs":[
+			{"html_url":"https://gh.example/o/r/actions/runs/1","path":".github/workflows/lint.yml","head_sha":"def"},
+			{"html_url":"https://gh.example/o/r/actions/runs/2","path":".github/workflows/apply.yml","head_sha":"def"}]}`)
+	}))
+	defer srv.Close()
+	g := newGitHub(envOf(map[string]string{"GITHUB_REPOSITORY": "o/r", "GITHUB_SERVER_URL": "https://gh.example",
+		"GITHUB_WORKFLOW_REF": "o/r/.github/workflows/apply.yml@refs/heads/main"}), io.Discard, io.Discard, vcs.NewGitHubClient(srv.URL, ""))
+	if got := g.RunFor("def"); got != "https://gh.example/o/r/actions/runs/2" {
+		t.Errorf("run: %s", got)
+	}
+	if got := g.RunFor("nope"); got != "https://gh.example/o/r/commit/nope" {
+		t.Errorf("no run: %s", got)
 	}
 }

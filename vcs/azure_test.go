@@ -368,10 +368,12 @@ func TestAzureBranchHead(t *testing.T) {
 }
 
 func TestNewAzure(t *testing.T) {
-	if _, err := New(Config{Name: "azure", URL: "https://dev.azure.example/org/", Repo: "proj/repo"}); err != nil {
+	collection := NewAzureClient("https://dev.azure.example/org/", "")
+	if _, err := New(Config{Name: "azure", Azure: collection, Repo: "proj/repo"}); err != nil {
 		t.Error(err)
 	}
-	for _, c := range []Config{{Name: "azure", Repo: "proj/repo"}, {Name: "azure", URL: "u", Repo: "repo"}} {
+	for _, c := range []Config{{Name: "azure", Repo: "proj/repo"}, {Name: "azure", Azure: NewAzureClient("", ""), Repo: "proj/repo"},
+		{Name: "azure", Azure: collection, Repo: "repo"}} {
 		if _, err := New(c); err == nil {
 			t.Errorf("%+v: want an error", c)
 		}

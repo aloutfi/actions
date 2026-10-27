@@ -57,8 +57,7 @@ type Config struct {
 	Name   string  // adapter name: github, azure, none; "" picks github, or none without a repo
 	Repo   string  // host-specific repo id: owner/repo on GitHub, <project>/<repository> on Azure Repos
 	GitHub *Client // github: the one GitHub REST client, shared with the CI adapter
-	URL    string  // azure: the Azure DevOps collection
-	Token  string  // azure: the access token
+	Azure  *Client // azure: the one Azure DevOps client (the collection), shared with the CI adapter
 	Author string  // GitHub: the login that owns tfpr's comments; "" is the default
 	Ack    bool    // Azure Repos: plan threads wait for a reviewer (see Azure)
 }
@@ -79,10 +78,10 @@ func New(cfg Config) (VCS, error) {
 		}
 		return NewGitHub(cfg.GitHub, cfg.Repo, cfg.Author), nil
 	case "azure":
-		if cfg.URL == "" || !strings.Contains(cfg.Repo, "/") {
-			return nil, fmt.Errorf("Azure Repos needs the collection URL and <project>/<repository> (got '%s', '%s')", cfg.URL, cfg.Repo)
+		if cfg.Azure == nil || cfg.Azure.BaseURL == "" || !strings.Contains(cfg.Repo, "/") {
+			return nil, fmt.Errorf("Azure Repos needs the collection URL and <project>/<repository> (got repository '%s')", cfg.Repo)
 		}
-		return NewAzure(NewAzureClient(cfg.URL, cfg.Token), cfg.Repo, cfg.Ack), nil
+		return NewAzure(cfg.Azure, cfg.Repo, cfg.Ack), nil
 	case "none":
 		return NoPR{}, nil
 	}
