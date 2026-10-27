@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/aloutfi/actions/redact"
 	"github.com/aloutfi/actions/vcs"
@@ -20,12 +21,14 @@ const (
 
 // Ctx is what tfpr needs to know about the current run.
 type Ctx struct {
-	CI            string // adapter name: github, local
+	CI            string // adapter name: github, azure, local
 	RunID, RunURL string
 	SHA           string // commit being built
 	Ref           string // full ref, e.g. refs/heads/main
 	PR            string // PR number for pull-request builds, else ""
 	Repo          string // repo id the VCS adapter understands
+	VCS           string // the repo host this CI says the repo lives on: github, azure; "" unknown
+	VCSURL        string // that host's API base URL, when the CI knows it
 	Actor         string
 	Attempt       int // 1 on the first attempt; 0 when the CI has no counter
 }
@@ -57,11 +60,14 @@ type SummaryLinker interface {
 type Env func(string) string
 
 // Detect returns the adapter for the CI platform described by env: GitHub
-// Actions, or Local when nothing else matches. Output and logs go to stdout
-// and stderr; api serves platforms that need REST calls.
+// Actions, Azure Pipelines, or Local when nothing else matches. Output and
+// logs go to stdout and stderr; api serves platforms that need REST calls.
 func Detect(env Env, stdout, stderr io.Writer, api *vcs.Client) CI {
-	if env("GITHUB_ACTIONS") == "true" {
+	switch {
+	case env("GITHUB_ACTIONS") == "true":
 		return newGitHub(env, stdout, stderr, api)
+	case strings.EqualFold(env("TF_BUILD"), "true"):
+		return newAzure(env, stdout, stderr, api)
 	}
 	return newLocal(env, stdout, stderr, api)
 }

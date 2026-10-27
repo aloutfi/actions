@@ -53,7 +53,7 @@ func TestGitHubContext(t *testing.T) {
 		"GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": event,
 	}
 	got := (&GitHub{env: envOf(env)}).Context()
-	want := Ctx{CI: "github", RunID: "9", RunURL: "https://gh.example/o/r/actions/runs/9", SHA: "abc",
+	want := Ctx{CI: "github", VCS: "github", RunID: "9", RunURL: "https://gh.example/o/r/actions/runs/9", SHA: "abc",
 		Ref: "refs/heads/main", PR: "42", Repo: "o/r", Actor: "me", Attempt: 1}
 	if got != want {
 		t.Errorf("got %+v\nwant %+v", got, want)
