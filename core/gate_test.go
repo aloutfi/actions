@@ -64,11 +64,16 @@ func TestParseRecord(t *testing.T) {
 	}
 	for _, bad := range []string{
 		"", "<!-- tf-plan:infra :: default -->", `<!-- tfpr:plan@1 {"key":"k"} --> trailing`,
-		`<!-- tfpr:plan@1 {"key":"k","extra":1} -->`, `<!-- tfpr:plan@1 {"key":"k"}{"key":"l"} -->`,
+		`<!-- tfpr:plan@1 {"key":"k"}{"key":"l"} -->`, `<!-- tfpr:plan@2 {"key":"k"} -->`,
+		`<!-- tfpr:plan@ {"key":"k"} -->`, `<!-- tfpr:plan@1 not json -->`,
 	} {
 		if _, err := ParseRecord(bad); err == nil {
 			t.Errorf("%q: want an error", bad)
 		}
+	}
+	// A later @1 record may add fields: still readable.
+	if rec, err := ParseRecord(`<!-- tfpr:plan@1 {"key":"k","status":"no_op","added_later":{"x":1}} -->`); err != nil || rec.Status != "no_op" {
+		t.Errorf("additive field: %+v, %v", rec, err)
 	}
 	if RecordRun([]string{record(StatusNoOp, "T")}) != "77" || RecordRun(nil) != "" || RecordRun([]string{"x"}) != "" {
 		t.Error("RecordRun")

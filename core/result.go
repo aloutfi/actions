@@ -495,14 +495,22 @@ type RecordData struct {
 
 const recordPrefix, recordSuffix = "<!-- tfpr:plan@1 ", " -->"
 
-// ParseRecord reads a record line back. Anything that isn't exactly one is
-// an error.
+// ParseRecord reads a record line back. Records of the same major version
+// (plan@1) may carry fields this version doesn't know, since fields are
+// only ever added within a major; those are ignored. Another major, or
+// anything that isn't exactly one record, is an error.
 func ParseRecord(line string) (RecordData, error) {
 	var rec RecordData
-	body, ok := strings.CutPrefix(strings.TrimSpace(line), recordPrefix)
-	if body, ok2 := strings.CutSuffix(body, recordSuffix); ok && ok2 {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(line), "<!-- tfpr:plan@")
+	if !ok {
+		return rec, errors.New("not a tfpr plan record")
+	}
+	major, rest, _ := strings.Cut(rest, " ")
+	if major != "1" {
+		return rec, fmt.Errorf("unsupported tfpr plan record version plan@%s", major)
+	}
+	if body, ok := strings.CutSuffix(rest, recordSuffix); ok {
 		dec := json.NewDecoder(strings.NewReader(body))
-		dec.DisallowUnknownFields()
 		if err := dec.Decode(&rec); err == nil && !dec.More() {
 			return rec, nil
 		}
