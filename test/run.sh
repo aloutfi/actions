@@ -150,6 +150,24 @@ while IFS=$'\037' read -r name stack workspace expected; do
   assert_has "artifact_name: ${name}" "${OUTPUTS}" "artifact_name=${expected}"
 done < <(cases artifact_name.tsv)
 
+# same_stack.tsv: apply takes the reviewed planfile only when its metadata
+# names this stack. Planfile applies skip the branch-head lookup, and the
+# unreachable API makes the apply-result comment skip itself.
+while IFS=$'\037' read -r name metadata_stack tfpr_stack same; do
+  new_ws
+  mkdir -p "${ws}/artifact"
+  echo "reviewed plan" > "${ws}/artifact/tfplan"
+  printf '{"stack":"%s","workspace":"default"}\n' "${metadata_stack}" > "${ws}/artifact/plan-metadata.json"
+  run_tfpr apply TFPR_USE_PLANFILE=true TFPR_PLAN_DIR=artifact TFPR_STACK="${tfpr_stack}" \
+    GITHUB_API_URL=http://127.0.0.1:9
+  if [[ "${same}" == "true" ]]; then
+    assert_has "same_stack: ${name}: applies the planfile" "${CALLS}" "-lock-timeout=5m tfplan"
+  else
+    assert_eq "same_stack: ${name}: refused" 1 "${RC}"
+    assert_lacks "same_stack: ${name}: no apply" "${CALLS}" "terraform apply"
+  fi
+done < <(cases same_stack.tsv)
+
 new_ws
 mkdir -p "${ws}/artifact"
 echo "stale" > "${ws}/artifact/tfplan"

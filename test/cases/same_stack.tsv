@@ -1,0 +1,8 @@
+# name	metadata_stack	tfpr_stack	same
+identical	stack	stack	true
+trailing slash	stack/	stack	true
+leading ./	./stack	stack/	true
+dot segments	stack/./	./stack	true
+repeated slashes	stack//	stack	true
+another stack	other-stack	stack	false
+prefix only	stack	stack2	false

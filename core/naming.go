@@ -2,6 +2,8 @@ package core
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -26,6 +28,12 @@ func ArtifactName(stack, workspace string) string {
 	slug := strings.TrimPrefix(strings.TrimSuffix(b.String(), "-"), "-")
 	return "tfplan-" + slug + "-" + orDefault(workspace)
 }
+
+// SameStack reports whether two stack paths name the same directory, so that
+// "infra", "infra/" and "./infra" match.
+func SameStack(a, b string) bool { return cleanStack(a) == cleanStack(b) }
+
+func cleanStack(s string) string { return path.Clean(filepath.ToSlash(s)) }
 
 // PlanMarker opens the plan comment for a stack and workspace; the upsert
 // finds its own comment by this prefix.

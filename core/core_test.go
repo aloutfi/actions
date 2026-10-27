@@ -72,6 +72,14 @@ func TestArtifactName(t *testing.T) {
 	}
 }
 
+func TestSameStack(t *testing.T) {
+	for _, c := range cases(t, "same_stack.tsv", 4) {
+		if got := SameStack(c[1], c[2]); got != (c[3] == "true") {
+			t.Errorf("%s: SameStack(%q, %q) = %v", c[0], c[1], c[2], got)
+		}
+	}
+}
+
 // TestRenderPlanGoldens renders each fixture the way test/run.sh does.
 func TestRenderPlanGoldens(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join("..", "test", "fixtures", "render", "*"))

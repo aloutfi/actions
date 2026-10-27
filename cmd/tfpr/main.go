@@ -342,7 +342,8 @@ func (a *app) decide() error {
 }
 
 // reviewedPlanfile reports whether TFPR_PLAN_DIR holds a downloaded planfile
-// whose plan-metadata.json is for this stack and workspace. A tfplan already
+// whose plan-metadata.json is for this stack (compared as cleaned paths, so
+// "infra/" matches "infra") and workspace. A tfplan already
 // in the stack directory (say, from an earlier plan in the same job) never
 // counts as the reviewed plan.
 func (a *app) reviewedPlanfile() bool {
@@ -355,7 +356,11 @@ func (a *app) reviewedPlanfile() bool {
 	}
 	var meta map[string]any
 	data, err := os.ReadFile(filepath.Join(dir, "plan-metadata.json"))
-	if err != nil || json.Unmarshal(data, &meta) != nil || meta["stack"] != a.stack || meta["workspace"] != a.workspace {
+	if err == nil {
+		err = json.Unmarshal(data, &meta)
+	}
+	stack, ok := meta["stack"].(string)
+	if err != nil || !ok || !core.SameStack(stack, a.stack) || meta["workspace"] != a.workspace {
 		a.ci.Log(ci.Warning, fmt.Sprintf("Ignoring the planfile artifact: its plan-metadata.json is missing or is not for stack '%s' workspace '%s'.", a.stack, a.workspace))
 		return false
 	}

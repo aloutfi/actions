@@ -112,7 +112,8 @@ How apply chooses what to run:
 | Re-run (attempt > 1) | Fresh plan |
 
 The planfile is downloaded outside the checkout, and its `plan-metadata.json`
-must name the same `stack` and `workspace` strings as the apply. A `tfplan`
+must name the same `stack` and `workspace` as the apply. Stacks are compared
+as cleaned paths, so `infra/`, `infra` and `./infra` match. A `tfplan`
 already in the stack directory is never treated as the reviewed plan.
 
 Every fresh apply (any row above that says "fresh plan") first checks that the

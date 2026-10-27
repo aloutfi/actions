@@ -370,6 +370,28 @@ func TestApplyPlanfileProvenance(t *testing.T) {
 	has(t, "use_planfile=false ignores stack tfplan", s.run("apply").tf, "-lock-timeout=5m -auto-approve")
 }
 
+// The metadata's stack and TFPR_STACK match as paths, not strings.
+func TestApplyPlanfileStackPathsMatch(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(root, "test", "cases", "same_stack.tsv"))
+	must(t, err)
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		c := strings.Split(line, "\t")
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		s := newScenario(t).set("TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact", "TFPR_STACK", c[2])
+		s.planArtifact(c[1], "default")
+		r := s.run("apply")
+		if c[3] == "true" {
+			eq(t, c[0]+": exit code", 0, r.rc)
+			has(t, c[0]+": applies the planfile", r.tf, "-lock-timeout=5m tfplan")
+		} else {
+			eq(t, c[0]+": exit code", 1, r.rc)
+			lacks(t, c[0]+": no apply", r.tf, "terraform apply")
+		}
+	}
+}
+
 func TestDecide(t *testing.T) {
 	s := newScenario(t).set("TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact")
 	s.planArtifact("stack", "default")
