@@ -253,9 +253,8 @@ while IFS=$'\037' read -r name stack workspace expected; do
 done < <(cases artifact_name.tsv)
 
 # same_stack.tsv: apply takes the reviewed planfile only when its metadata
-# names this stack. A first attempt on a tag needs no branch-head lookup.
-# names this stack. Planfile applies skip the branch-head lookup, and the
-# unreachable API makes the apply-result comment skip itself.
+# names this stack. A first attempt on a tag needs no branch-head lookup, and
+# the unreachable API makes the apply-result comment skip itself.
 while IFS=$'\037' read -r name metadata_stack tfpr_stack same; do
   new_ws
   mkdir -p "${ws}/artifact"
