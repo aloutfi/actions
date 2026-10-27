@@ -93,21 +93,15 @@ func (g *GitHub) UpsertComment(c Comment) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var id int64
 	// If the listing fails, tfpr cannot know whether its comment exists, and
 	// posting could duplicate it, so it gives up instead.
-	err = GetPages(g.api, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100", g.repo, url.PathEscape(pr)),
-		func(page []issueComment) bool {
-			for _, ic := range page {
-				if ic.User.Login == author && strings.HasPrefix(ic.Body, marker) {
-					id = ic.ID
-					return false
-				}
-			}
-			return true
-		})
+	own, err := g.own(pr, marker, author, true)
 	if err != nil {
-		return "", fmt.Errorf("list comments on PR #%s: %w", pr, err)
+		return "", err
+	}
+	var id int64
+	if len(own) > 0 {
+		id = own[0].ID
 	}
 	payload := map[string]string{"body": Compose(marker, c.Record, c.Body)}
 	if id != 0 {
@@ -120,6 +114,51 @@ func (g *GitHub) UpsertComment(c Comment) (string, error) {
 		return "", err
 	}
 	return "Posted comment on PR #" + pr, nil
+}
+
+// own lists author's comments on pr that start with marker; with first, it
+// stops at the first one.
+func (g *GitHub) own(pr, marker, author string, first bool) ([]issueComment, error) {
+	var found []issueComment
+	err := GetPages(g.api, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100", g.repo, url.PathEscape(pr)),
+		func(page []issueComment) bool {
+			for _, ic := range page {
+				if ic.User.Login == author && strings.HasPrefix(ic.Body, marker) {
+					found = append(found, ic)
+					if first {
+						return false
+					}
+				}
+			}
+			return true
+		})
+	if err != nil {
+		return nil, fmt.Errorf("list comments on PR #%s: %w", pr, err)
+	}
+	return found, nil
+}
+
+// Records reads the record line (the comment's second line) from every
+// comment of the adapter's author for marker.
+func (g *GitHub) Records(pr, marker string) ([]string, error) {
+	author, err := g.login()
+	if err != nil {
+		return nil, err
+	}
+	own, err := g.own(pr, marker, author, false)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]string, 0, len(own))
+	for _, c := range own {
+		lines := strings.SplitN(c.Body, "\n", 3)
+		rec := ""
+		if len(lines) > 1 && strings.HasPrefix(lines[1], "<!-- tfpr:plan@") {
+			rec = lines[1]
+		}
+		records = append(records, rec)
+	}
+	return records, nil
 }
 
 // PRsForCommit lists the PRs associated with sha (first page only). GitHub

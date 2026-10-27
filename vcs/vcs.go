@@ -40,6 +40,11 @@ type VCS interface {
 	// duplicate. Hosts that can store the marker and record out of band
 	// (thread properties) do; others put them above the body.
 	UpsertComment(c Comment) (string, error)
+	// Records returns the comment records (Record lines) on pr's comments
+	// for marker that the adapter's own identity wrote; "" for such a
+	// comment without one. Comments by anyone else are ignored, so a PR
+	// participant can't forge a record.
+	Records(pr, marker string) ([]string, error)
 	// PRsForCommit lists the PRs associated with sha, such as the PR that
 	// merged it into ref (the full ref being built, e.g. refs/heads/main).
 	PRsForCommit(sha, ref string) ([]PR, error)

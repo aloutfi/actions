@@ -377,3 +377,19 @@ func TestNewAzure(t *testing.T) {
 		}
 	}
 }
+
+func TestAzureRecords(t *testing.T) {
+	withRecord := func(id int, author, rec string) map[string]any {
+		th := existing(id, author, marker, "fp", "active")
+		th["properties"].(map[string]any)[propRecord] = map[string]any{"$type": "System.String", "$value": rec}
+		return th
+	}
+	f := &fakeADO{me: "build-id", threads: []map[string]any{
+		withRecord(5, "someone-else", `<!-- tfpr:plan@1 {"status":"no_op"} -->`), // forged: not the build identity
+		withRecord(6, "build-id", `<!-- tfpr:plan@1 {"status":"changes"} -->`),
+	}}
+	recs, err := newADO(t, f, false).Records("7", marker)
+	if err != nil || len(recs) != 1 || recs[0] != `<!-- tfpr:plan@1 {"status":"changes"} -->` {
+		t.Errorf("got %q, %v", recs, err)
+	}
+}
