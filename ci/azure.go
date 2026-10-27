@@ -95,19 +95,24 @@ func (a *Azure) JobURL() string {
 
 // SetOutput sets an output variable that later jobs and stages can read
 // (isOutput=true; reference it through the step's name).
+//
+// The value is also neutralized (escapeMessage), so a value can never carry
+// a "##vso[" command. That's deliberately fail-safe: outputs are counts,
+// flags and names, which never contain one legitimately.
 func (a *Azure) SetOutput(name, value string) error {
 	_, err := fmt.Fprintf(a.out, "##vso[task.setvariable variable=%s;isOutput=true]%s\n", escapeProperty(name), escapeMessage(value))
 	return err
 }
 
-// Log writes a warning or error as a log issue; anything else is a plain
-// line. Messages are escaped and cannot carry a second command.
+// Log writes a warning or error as a log issue, with the message escaped as
+// command data. Anything else is a plain line: not escaped (it is no command
+// data), only neutralized so it cannot become a command.
 func (a *Azure) Log(level, msg string) {
 	switch level {
 	case Warning, Error:
 		fmt.Fprintf(a.out, "##vso[task.logissue type=%s]%s\n", level, escapeMessage(msg))
 	default:
-		fmt.Fprintln(a.out, neutralize(escapeMessage(msg)))
+		fmt.Fprintln(a.out, neutralize(msg))
 	}
 }
 

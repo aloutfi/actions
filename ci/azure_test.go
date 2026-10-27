@@ -120,6 +120,7 @@ func TestAzureCommands(t *testing.T) {
 	a.Log(Warning, "careful ##vso[task.setvariable variable=x]y")
 	a.Log(Error, "50%\nbad")
 	a.Log(Notice, "##[error]not really")
+	a.Log(Notice, "100% plain\nline two ##vso[x]")
 	_ = a.AddBuildTag("drift")
 	_ = a.CompleteWithIssues("drift found")
 	want := strings.Join([]string{
@@ -128,6 +129,8 @@ func TestAzureCommands(t *testing.T) {
 		"##vso[task.logissue type=warning]careful # #vso[task.setvariable variable=x]y",
 		"##vso[task.logissue type=error]50%AZP25%0Abad",
 		"# #[error]not really",
+		"100% plain",
+		"line two # #vso[x]",
 		"##vso[build.addbuildtag]drift",
 		"##vso[task.complete result=SucceededWithIssues;]drift found",
 	}, "\n") + "\n"
