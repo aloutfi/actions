@@ -1223,6 +1223,14 @@ func TestPlannedCommitAndPRHead(t *testing.T) {
 	has(t, "Azure: PR head", res, `"head_sha": "abc"`)
 }
 
+func TestVersion(t *testing.T) {
+	for _, arg := range []string{"--version", "version"} {
+		var out bytes.Buffer
+		eq(t, arg+": exit code", 0, run([]string{arg}, &out, &out))
+		eq(t, arg+": output", "tfpr dev\n", out.String())
+	}
+}
+
 func TestUsage(t *testing.T) {
 	var out bytes.Buffer
 	eq(t, "exit code", 1, run(nil, &out, &out))

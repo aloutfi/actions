@@ -1,6 +1,6 @@
 // Command tfpr runs Terraform plan -> PR comment -> apply.
 //
-// Usage: tfpr <command>
+// Usage: tfpr <command> | tfpr --version
 //
 //	plan              init, workspace select, validate, plan; write the plan dir
 //	                  (plan-result.json, filtered plan text), plus plan.json,
@@ -153,6 +153,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	cmd := ""
 	if len(args) > 0 {
 		cmd = args[0]
+	}
+	if cmd == "--version" || cmd == "version" {
+		fmt.Fprintln(stdout, "tfpr", version)
+		return 0
 	}
 	f, ok := commands[cmd]
 	if !ok {
