@@ -6,8 +6,9 @@ document instead. Blocks get a PlanView, except "unit", "resources" and
 "body", which get a UnitView (see core/render.go).
 */ -}}
 {{template "header" .}}{{template "banner" .}}
-{{- if eq .Status "error"}}{{template "failed" .}}
-{{- else}}{{template "counts" .}}{{range .Units}}{{template "unit" .}}{{end}}{{template "outputs" .}}{{end -}}
+{{- if eq .Status "error"}}{{template "failed" .}}{{end -}}
+{{- /* A failed plain-terraform plan has nothing else to show. Units that did plan are shown as usual. */ -}}
+{{- if or (ne .Status "error") .Multi}}{{template "counts" .}}{{range .Units}}{{template "unit" .}}{{end}}{{template "outputs" .}}{{end -}}
 {{template "footer" .}}
 
 {{- define "header" -}}

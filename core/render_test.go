@@ -355,3 +355,27 @@ func TestAllocateKeepsStrictRiskOrder(t *testing.T) {
 		t.Errorf("listed %d updates and %d creates, want 2 and 0", update.Listed, create.Listed)
 	}
 }
+
+// With one unit failed, the result's status is error. The banner must only
+// describe what the comment shows; the units that planned are shown.
+func TestErrorStatusBannerMatchesTheBody(t *testing.T) {
+	net := fixtureUnit(t, "large")
+	net.Path = "net"
+	r := NewPlanResult(PlanResult{Target: Target{Stack: "live", Workspace: "prod"}}, []Unit{FailedUnit("db", intp(1), "boom"), net})
+	got, err := RenderPlan(PlanComment{Result: r, Host: HostFor("github"), Budget: 20000,
+		Texts: map[string]string{"net": string(fixtureFile(t, "large", "plan.txt"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "Plan text truncated") != strings.Contains(got, "Plan output for net (truncated") {
+		t.Errorf("the banner and the body disagree about the plan text:\n%s", got)
+	}
+	if strings.Contains(got, "Resource list shortened") != strings.Contains(got, "more `create` lines") {
+		t.Errorf("the banner and the body disagree about the resource list:\n%s", got)
+	}
+	for _, want := range []string{"**Plan failed.**", "Reason: `boom`", "| `db` | error |", "-   terraform_data.legacy[0]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q:\n%s", want, got)
+		}
+	}
+}
