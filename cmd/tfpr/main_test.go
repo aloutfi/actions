@@ -989,6 +989,29 @@ func TestUsage(t *testing.T) {
 	has(t, "message", out.String(), "tfpr: usage: tfpr plan|derive|render|comment|decide|apply|resolve-plan-run")
 }
 
+// comment writes the full plan to the job summary first, through the
+// filter, and links it from the comment.
+func TestCommentWritesTheJobSummary(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_FILTER", `sed 's/"beta"/"REDACTED"/g'`,
+		"TFPR_PLAN_TXT_URL", "https://github.example/artifacts/9")
+	s.byo("moves-only")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "summary: full plan, noise kept", r.summary, "# (1 unchanged attribute hidden)")
+	has(t, "summary: expanded", r.summary, "<details open><summary>Plan output for stack</summary>")
+	has(t, "summary: filtered", r.summary, `terraform_data.entry["REDACTED"]`)
+	lacks(t, "summary: filtered", r.summary, `"beta"`)
+	lacks(t, "comment: noise removed", r.body, "unchanged attribute hidden")
+	has(t, "comment: links the summary", r.body, "[full plan](https://github.example/o/r/actions/runs/1)")
+
+	// Off: no summary, no link.
+	s = newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_SUMMARY", "false")
+	s.byo("moves-only")
+	r = s.run("comment")
+	eq(t, "off: summary", "", r.summary)
+	lacks(t, "off: no link", r.body, "[full plan]")
+}
+
 // Outside a pull request there is no comment, but the summary is written,
 // with no API calls.
 func TestSummaryWithoutPR(t *testing.T) {

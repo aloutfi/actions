@@ -95,10 +95,21 @@ for dir in */; do
   assert_golden "summary ${name}" "render/${name}/summary.md${gz}" "${sandbox}/summary.md"
 done
 
-# The truncated fixture must be cut, and say so up front: the banner is
-# within the comment's first five lines.
-if head -n 5 truncated/expected.md | grep -q '^> \*\*Plan text truncated\*\*'; then pass; else
-  fail "truncated: no truncation banner in the first five lines"; fi
+# The truncated and large fixtures must be cut, and say so up front: the
+# banner is within the comment's first five lines, every delete is listed,
+# and the whole comment fits GitHub's limit.
+for name in truncated large; do
+  if head -n 5 "${name}/expected.md" | grep -q '^> \*\*Plan text truncated\*\*'; then pass; else
+    fail "${name}: no truncation banner in the first five lines"; fi
+done
+# Bytes bound characters from above.
+size="$(wc -c < large/expected.md | tr -d ' ')"
+if [[ "${size}" -le 65536 ]]; then pass; else fail "large: ${size} bytes, over GitHub's 65,536 characters"; fi
+# shellcheck disable=SC2016 # literal backticks
+list="$(sed -n '/^```diff$/,/^```$/p' large/expected.md)"
+missing_deletes="$(gunzip -c large/plan.txt.gz | sed -n 's/^  # \(.*\) will be destroyed$/\1/p' |
+  while read -r address; do grep -qF -- " ${address} " <<< "${list}" || echo "${address}"; done)"
+assert_eq "large: every destroy is listed" "" "${missing_deletes}"
 cd "${root}"
 
 # --- commands with a stub terraform ------------------------------------------
