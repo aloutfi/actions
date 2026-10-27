@@ -1,0 +1,105 @@
+name: "Terraform Apply"
+description: >-
+  Apply the reviewed planfile from the plan action's artifact, or a fresh plan
+  when no planfile is requested or the run is a re-run. A requested planfile
+  that is missing fails the apply unless allow_fresh_plan_fallback is true.
+  Re-runs are refused unless the run's commit is still the head of its branch.
+  Provider credentials come from job-level `env:` (see the plan action).
+
+inputs:
+  stack:
+    description: Terraform working directory (must match the plan action's)
+    required: false
+    default: "terraform/"
+  workspace:
+    description: Terraform workspace
+    required: false
+    default: "default"
+  terraform_version:
+    description: Terraform version
+    required: false
+    default: "1.15.3"
+  use_planfile:
+    description: >-
+      Download and apply the planfile produced by the plan action. Re-runs
+      (attempt > 1) always fresh-plan instead, and only from the branch head.
+    required: false
+    default: "false"
+  allow_fresh_plan_fallback:
+    description: >-
+      When use_planfile is true and the artifact is missing on the first
+      attempt, apply a fresh plan instead of failing.
+    required: false
+    default: "false"
+  plan_artifact_run_id:
+    description: Workflow run ID that produced the planfile (blank = current run)
+    required: false
+    default: ""
+  lock_timeout:
+    description: terraform apply -lock-timeout value
+    required: false
+    default: "5m"
+  comment_author:
+    description: Login that owns the apply-result comment. Only its comments are updated.
+    required: false
+    default: "github-actions[bot]"
+  token:
+    description: Token for GitHub API calls (artifact download, PR lookup, comment). Not exposed to terraform.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  apply_exit_code:
+    description: terraform apply exit code
+    value: ${{ steps.apply.outputs.apply_exit_code }}
+  used_plan_artifact:
+    description: "'true' | 'false'"
+    value: ${{ steps.apply.outputs.used_plan_artifact }}
+  fallback_reason:
+    description: "'rerun' | 'missing-artifact' | 'no-artifact-requested' | 'stale-rerun' | ''"
+    value: ${{ steps.apply.outputs.fallback_reason }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: ${{ inputs.terraform_version }}
+        terraform_wrapper: false
+
+    - name: Decide plan source
+      id: decide
+      shell: bash
+      env:
+        TFPR_STACK: ${{ inputs.stack }}
+        TFPR_WORKSPACE: ${{ inputs.workspace }}
+        TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
+      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" decide'
+
+    - name: Download plan artifact
+      if: steps.decide.outputs.download == 'true'
+      # A missing artifact is handled by `tfpr apply` (fail closed or fall back).
+      continue-on-error: true
+      uses: actions/download-artifact@v7
+      with:
+        name: ${{ steps.decide.outputs.artifact_name }}
+        path: ${{ inputs.stack }}
+        run-id: ${{ inputs.plan_artifact_run_id }}
+        # Cross-run downloads need github-token; without it the action looks
+        # only at the current run and reports "not found".
+        github-token: ${{ inputs.token }}
+
+    - name: Terraform apply
+      id: apply
+      shell: bash
+      env:
+        TFPR_STACK: ${{ inputs.stack }}
+        TFPR_WORKSPACE: ${{ inputs.workspace }}
+        TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
+        TFPR_ALLOW_FRESH_PLAN_FALLBACK: ${{ inputs.allow_fresh_plan_fallback }}
+        TFPR_PLAN_RUN_ID: ${{ inputs.plan_artifact_run_id }}
+        TFPR_LOCK_TIMEOUT: ${{ inputs.lock_timeout }}
+        TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" apply'

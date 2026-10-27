@@ -1,0 +1,34 @@
+name: "Resolve PR plan run"
+description: >-
+  From a merge commit SHA, find the workflow run that planned the PR's head
+  commit. Emits an empty run_id on re-run, direct push (no PR), multiple PRs,
+  or no successful run; pass it to the apply action's plan_artifact_run_id.
+  The token needs `actions: read`.
+
+inputs:
+  plan_workflow_filename:
+    description: File name of the workflow that ran the plan and uploaded the planfile (e.g. `pr.yaml`)
+    required: false
+    default: "pr.yaml"
+  token:
+    description: Token for GitHub API calls
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  run_id:
+    description: Plan workflow run ID, or empty
+    value: ${{ steps.resolve.outputs.run_id }}
+  pr_number:
+    description: PR number, or empty
+    value: ${{ steps.resolve.outputs.pr_number }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        TFPR_PLAN_WORKFLOW: ${{ inputs.plan_workflow_filename }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" resolve-plan-run'

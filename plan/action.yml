@@ -1,0 +1,91 @@
+name: "Terraform Plan"
+description: >-
+  Run terraform init, validate and plan; parse the plan; optionally upload the
+  binary planfile as an artifact; and upsert a PR comment with a summary.
+  Provider credentials come from job-level `env:`, which composite steps
+  inherit. Step-level `env:` on the `uses:` step does not reach them.
+
+inputs:
+  stack:
+    description: Terraform working directory
+    required: false
+    default: "terraform/"
+  workspace:
+    description: Terraform workspace
+    required: false
+    default: "default"
+  terraform_version:
+    description: Terraform version
+    required: false
+    default: "1.15.3"
+  output_planfile:
+    description: Upload the binary planfile and plan-metadata.json as an artifact
+    required: false
+    default: "false"
+  comment_author:
+    description: Login that owns the PR comment. Only its comments are updated.
+    required: false
+    default: "github-actions[bot]"
+  token:
+    description: Token for GitHub API calls (PR comment, job link). Not exposed to terraform.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  exit_code:
+    description: terraform plan -detailed-exitcode (0=no changes, 2=changes)
+    value: ${{ steps.plan.outputs.exit_code }}
+  has_changes:
+    description: "'true' | 'false'"
+    value: ${{ steps.plan.outputs.has_changes }}
+  has_imports:
+    description: "'true' | 'false'"
+    value: ${{ steps.plan.outputs.has_imports }}
+  has_output_changes:
+    description: Whether the plan contains output changes ('true' | 'false')
+    value: ${{ steps.plan.outputs.has_output_changes }}
+  summary:
+    description: One-line "N to add, N to change, N to destroy, N to replace, N to import"
+    value: ${{ steps.plan.outputs.summary }}
+  plan_artifact_name:
+    description: Artifact name for the planfile (uploaded when output_planfile=true)
+    value: ${{ steps.plan.outputs.plan_artifact_name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: ${{ inputs.terraform_version }}
+        terraform_wrapper: false
+
+    - name: Terraform plan
+      id: plan
+      shell: bash
+      env:
+        TFPR_STACK: ${{ inputs.stack }}
+        TFPR_WORKSPACE: ${{ inputs.workspace }}
+      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" plan'
+
+    - name: Upload plan artifact
+      if: inputs.output_planfile == 'true'
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ steps.plan.outputs.plan_artifact_name }}
+        path: |
+          ${{ inputs.stack }}/tfplan
+          ${{ inputs.stack }}/plan-metadata.json
+        retention-days: 1
+        if-no-files-found: error
+
+    - name: Upsert PR comment
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        TFPR_STACK: ${{ inputs.stack }}
+        TFPR_WORKSPACE: ${{ inputs.workspace }}
+        TFPR_EXIT_CODE: ${{ steps.plan.outputs.exit_code }}
+        TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" comment'
