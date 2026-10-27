@@ -40,25 +40,14 @@ type CI interface {
 // Env reads an environment variable; os.Getenv in production.
 type Env func(string) string
 
-// detectors is ordered: the first match wins, and local always matches.
-var detectors = []struct {
-	name  string
-	match func(Env) bool
-	new   func(Env, io.Writer, io.Writer, *vcs.Client) CI
-}{
-	{"github", func(e Env) bool { return e("GITHUB_ACTIONS") == "true" }, newGitHub},
-	{"local", func(Env) bool { return true }, newLocal},
-}
-
-// Detect returns the adapter for the CI platform described by env. Output
-// and logs go to stdout and stderr; api serves platforms that need REST calls.
+// Detect returns the adapter for the CI platform described by env: GitHub
+// Actions, or Local when nothing else matches. Output and logs go to stdout
+// and stderr; api serves platforms that need REST calls.
 func Detect(env Env, stdout, stderr io.Writer, api *vcs.Client) CI {
-	for _, d := range detectors {
-		if d.match(env) {
-			return d.new(env, stdout, stderr, api)
-		}
+	if env("GITHUB_ACTIONS") == "true" {
+		return newGitHub(env, stdout, stderr, api)
 	}
-	panic("unreachable: local always matches")
+	return newLocal(env, stdout, stderr, api)
 }
 
 // appendOutput appends a name=value line to the step-output file at path.

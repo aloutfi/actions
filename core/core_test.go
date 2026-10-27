@@ -31,6 +31,9 @@ func cases(t *testing.T, name string, columns int) [][]string {
 	return rows
 }
 
+// String is "<source> [reason]", the form the case tables use.
+func (d Decision) String() string { return strings.TrimSpace(d.Source + " " + d.Reason) }
+
 func TestDecidePlanSource(t *testing.T) {
 	for _, c := range cases(t, "decide_plan_source.tsv", 6) {
 		attempt, err := strconv.Atoi(c[2])

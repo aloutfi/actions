@@ -21,9 +21,6 @@ func IsFirstAttempt(attempt int) bool { return attempt == 1 }
 // Decision is what apply runs, and why when it is not the reviewed planfile.
 type Decision struct{ Source, Reason string }
 
-// String is "<source> [reason]", the form the case tables use.
-func (d Decision) String() string { return strings.TrimSpace(d.Source + " " + d.Reason) }
-
 // DecidePlanSource chooses between the reviewed planfile, a fresh plan and
 // refusing to apply.
 func DecidePlanSource(usePlanfile bool, attempt int, hasPlanfile, allowFallback bool) Decision {
