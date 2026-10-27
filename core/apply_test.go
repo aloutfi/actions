@@ -28,6 +28,11 @@ func TestRenderApplyReport(t *testing.T) {
 			r.SupersededBy = "https://ci.example/run/2"
 			return r
 		}(), true, []string{"skipped: superseded", "> **Superseded by `def4567`**; that commit's run applies these changes ([link](https://ci.example/run/2))."}},
+		{"incomplete", func() ApplyReport {
+			r := report(GateApply, "", 0)
+			r.Incomplete = true
+			return r
+		}(), false, []string{"⚠️ Terraform apply · `infra` (`default`) · did not complete", "> **Apply did not complete** (no exit code; the apply step may have failed before it started or been cancelled), see [the run](https://ci.example/run/1)."}},
 		{"no-op", report(GateSkip, "no-op", 0), true, []string{"skipped: no changes", "> **Apply skipped**: the reviewed plan had no changes"}},
 		{"refused, branch", func() ApplyReport {
 			r := report(GateRefuse, "unverified-ref", 0)

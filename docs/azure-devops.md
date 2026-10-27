@@ -197,7 +197,11 @@ steps:
   the newest reaches the gate superseded and skips. The newest applies
   everything.
 - The gate writes `decision.json` to the stack's plan dir (`infra/.tfpr`).
-  `report` reads it, so a skip or refusal needs no exit code.
+  `report` reads it, so a skip or refusal needs no exit code. If the gate
+  said apply but there is no exit code (for example, the AzureCLI task's
+  login failed before its script ran), report still posts "Apply did not
+  complete", leaves the thread active, and fails. A missing apply log is
+  only a warning.
   `TFPR_APPLY_EXIT_CODE`, set by the apply step as a pipeline variable,
   reaches report as an environment variable.
 - `report` finds the merged PR from the merge commit: `pullrequestquery`,

@@ -157,10 +157,15 @@ func TestReport(t *testing.T) {
 	lacks(t, "no command lines", r.body, "::set-output")
 	has(t, "marker", r.body, "<!-- tf-apply:stack :: default -->\n")
 
-	s.set("TFPR_APPLY_EXIT_CODE", "")
+	// The apply step never ran its script: no exit code, no log. The PR still
+	// hears about it, and report fails after posting.
+	s.set("TFPR_APPLY_EXIT_CODE", "", "TFPR_APPLY_LOG", "missing.log")
 	r = s.run("report")
 	eq(t, "no exit code: fails", 1, r.rc)
-	has(t, "no exit code: says so", r.out, "TFPR_APPLY_EXIT_CODE must be the exit code of your terraform apply")
+	has(t, "no exit code: posts", r.body, "did not complete")
+	has(t, "no exit code: why", r.body, "> **Apply did not complete** (no exit code; the apply step may have failed before it started or been cancelled), see [the run](")
+	has(t, "no exit code: missing log is a warning", r.out, "::warning::TFPR_APPLY_LOG missing.log does not exist")
+	has(t, "no exit code: error after posting", r.out, "::error::the apply did not complete: TFPR_APPLY_EXIT_CODE is ''")
 
 	// A superseded run reports without an exit code, linking the newer run.
 	s = newScenario(t)
@@ -254,4 +259,25 @@ func TestGateIgnoresAStalePlan(t *testing.T) {
 	s = newScenario(t).set("TFPR_SKIP_NOOP", "true")
 	s.gh.comments = "[" + planComment(5, "github-actions[bot]", recordFor(core.StatusNoOp, "T", "push1")) + "]"
 	has(t, "skip-noop: applies", s.run("gate").outputs, "reason=record-not-for-pr-head")
+}
+
+// On Azure Pipelines, the AzureCLI task's login fails before its script runs:
+// the exit-code variable is never set and there is no apply log. report
+// still posts "did not complete" and leaves the thread active.
+func TestAzureReportAfterLoginFailure(t *testing.T) {
+	ado := &fakeAzureRepos{mergedPR: 7}
+	srv := httptest.NewServer(ado)
+	t.Cleanup(srv.Close)
+	s := newScenario(t)
+	s.azure("TfsGit").set("SYSTEM_COLLECTIONURI", srv.URL+"/org/", "TFPR_ADO_TOKEN", "t", "SYSTEM_DEFINITIONID", "12",
+		"BUILD_SOURCEBRANCH", "refs/heads/main", "BUILD_SOURCEVERSION", "squash1", "SYSTEM_JOBID", "job1",
+		"SYSTEM_PULLREQUEST_SOURCECOMMITID", "", "SYSTEM_PULLREQUEST_PULLREQUESTID", "")
+	has(t, "gate: apply", s.run("gate").out, "##vso[task.setvariable variable=apply;isOutput=true]true\n")
+	r := s.set("TFPR_APPLY_LOG", filepath.Join(t.TempDir(), "apply.log")).run("report")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "warning: no log", r.out, "##vso[task.logissue type=warning]TFPR_APPLY_LOG")
+	content := ado.created["comments"].([]any)[0].(map[string]any)["content"].(string)
+	has(t, "did not complete", content, "Apply did not complete")
+	has(t, "links the run", content, "_build/results?buildId=812&view=logs&j=job1")
+	eq(t, "thread stays active", any("active"), ado.created["status"])
 }

@@ -12,6 +12,7 @@ type ApplyReport struct {
 	Host             Host
 	Gate             GateResult // the gate's decision: apply, skip or refuse
 	ExitCode         int        // terraform apply's exit code, when the gate said apply
+	Incomplete       bool       // the gate said apply, but there is no exit code: the apply never finished
 	Source           Decision   // tfpr apply: the plan source; zero when the caller applied
 	PlanRun          string     // the run that made the planfile, for the source line
 	SupersededBy     string     // a link to the run (or commit) that applies instead
@@ -29,7 +30,7 @@ func (r ApplyReport) Resolved() bool {
 	case GateSkip:
 		return true
 	case GateApply:
-		return r.ExitCode == 0
+		return r.ExitCode == 0 && !r.Incomplete
 	}
 	return false
 }
@@ -62,6 +63,8 @@ func RenderApplyReport(r ApplyReport) (string, error) {
 		v.Icon, v.Status = "⏭️", "skipped: superseded"
 	case r.Gate.Action == GateSkip:
 		v.Icon, v.Status = "⏭️", "skipped: no changes"
+	case r.Incomplete:
+		v.Icon, v.Status, v.Failed = "⚠️", "did not complete", true
 	case r.ExitCode == 0:
 		v.Icon, v.Status = "✅", "succeeded"
 	default:

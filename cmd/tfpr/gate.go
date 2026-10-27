@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -159,22 +160,31 @@ func (a *app) report() error {
 		g = core.GateResult{Action: core.GateApply, SHA: a.ctx.SHA, Ref: a.ctx.Ref}
 	}
 	r := core.ApplyReport{Gate: g}
+	var incomplete error
 	if g.Action == core.GateApply {
 		s := os.Getenv("TFPR_APPLY_EXIT_CODE")
 		if r.ExitCode, err = strconv.Atoi(s); err != nil {
-			return fmt.Errorf("TFPR_APPLY_EXIT_CODE must be the exit code of your terraform apply, got '%s' (the gate decided to apply)", s)
+			// The apply step never set an exit code: it failed before it
+			// started (say, its login failed) or was cancelled. Say so on the
+			// PR, then fail.
+			r.Incomplete = true
+			incomplete = fmt.Errorf("the apply did not complete: TFPR_APPLY_EXIT_CODE is '%s', not an exit code", s)
 		}
 	}
 	if path := os.Getenv("TFPR_APPLY_LOG"); path != "" && g.Action == core.GateApply {
 		data, err := os.ReadFile(path)
-		if err != nil {
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			a.ci.Log(ci.Warning, "TFPR_APPLY_LOG "+path+" does not exist; reporting without the apply's output.")
+		case err != nil:
 			return fmt.Errorf("TFPR_APPLY_LOG: %w", err)
+		default:
+			text, err := a.filter.Apply(string(data))
+			if err != nil {
+				return fmt.Errorf("%w; nothing was posted", err)
+			}
+			r.Log = text.String()
 		}
-		text, err := a.filter.Apply(string(data))
-		if err != nil {
-			return fmt.Errorf("%w; nothing was posted", err)
-		}
-		r.Log = text.String()
 	}
 	if err := a.publishApply(v, r); err != nil {
 		if errors.Is(err, redact.ErrFailed) || errors.Is(err, vcs.ErrNoAuthor) {
@@ -183,7 +193,7 @@ func (a *app) report() error {
 		fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
 		a.ci.Log(ci.Warning, "Could not post the apply-result comment.")
 	}
-	return nil
+	return incomplete
 }
 
 // publishApply upserts the apply-result comment on the PR that merged this

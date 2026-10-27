@@ -4,6 +4,8 @@ The apply-result comment. It gets an ApplyView (see core/apply.go).
 ### {{.Icon}} Terraform apply · {{code .Stack}} ({{code .Workspace}}) · {{.Status}}
 {{if eq .Gate.Reason "superseded" -}}
 > **Superseded by {{code (short .Gate.BranchHead)}}**; that commit's run applies these changes{{with .SupersededBy}} ([link]({{.}})){{end}}.
+{{else if .Incomplete -}}
+> **Apply did not complete** (no exit code; the apply step may have failed before it started or been cancelled), see {{with .JobURL}}[the run]({{.}}){{else}}the CI log{{end}}.
 {{else if eq .Gate.Action "refuse" -}}
 > **Apply refused**: {{.Explain}}
 {{else if eq .Gate.Reason "no-op" -}}
