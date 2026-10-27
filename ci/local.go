@@ -20,8 +20,9 @@ func newLocal(env Env, stdout, stderr io.Writer, _ *vcs.Client) CI {
 	return &Local{env: env, out: stdout, stderr: stderr}
 }
 
-// Context is empty: a local run has no run id, commit or PR.
-func (l *Local) Context() Ctx { return Ctx{} }
+// Context is empty apart from the name: a local run has no run id, commit
+// or PR.
+func (l *Local) Context() Ctx { return Ctx{CI: "local"} }
 
 // JobURL is unknown.
 func (l *Local) JobURL() string { return "" }
@@ -34,6 +35,13 @@ func (l *Local) SetOutput(name, value string) error {
 	_, err := fmt.Fprintf(l.out, "%s=%s\n", name, value)
 	return err
 }
+
+// Inert passes text through: nothing reads commands from a local run.
+func (l *Local) Inert(w io.Writer) io.WriteCloser { return nopCloser{w} }
+
+type nopCloser struct{ io.Writer }
+
+func (nopCloser) Close() error { return nil }
 
 // Log prints "<level>: msg" on stderr.
 func (l *Local) Log(level, msg string) {
