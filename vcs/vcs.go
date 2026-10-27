@@ -4,6 +4,7 @@ package vcs
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aloutfi/actions/redact"
 )
@@ -14,15 +15,31 @@ type PR struct {
 	HeadSHA string
 }
 
+// Comment is one tfpr comment on a PR: a comment on GitHub, a thread on
+// Azure Repos.
+type Comment struct {
+	PR     string
+	Marker string // finds the comment again; tfpr's own, never filtered
+	Record string // the comment record; tfpr's own, never filtered; "" for none
+	// Body is the human-readable part. Only the redaction filter makes one.
+	Body redact.Text
+	// Resolved means there is nothing to review: a no-op plan or an apply
+	// result. Hosts with thread status close the thread.
+	Resolved bool
+	// Fingerprint identifies what was planned. With the ack option, a
+	// changed fingerprint reopens a thread a reviewer had resolved.
+	Fingerprint string
+}
+
 // VCS is the repo-host port. Identity scoping (whose comments may be
 // edited) lives inside the adapter.
 type VCS interface {
-	// UpsertComment updates the adapter's own comment on pr that starts with
-	// marker, or posts a new one. It returns a line describing what it did.
-	// marker and record ("" for none) are tfpr's own control lines and are
-	// never filtered; body must have been through the redaction filter
-	// (redact.Text). Hosts that can store the record out of band may do so.
-	UpsertComment(pr, marker, record string, body redact.Text) (string, error)
+	// UpsertComment updates the adapter's own comment for c.Marker on c.PR,
+	// or posts a new one. It returns a line describing what it did. If the
+	// existing comments can't be listed, it fails rather than risk a
+	// duplicate. Hosts that can store the marker and record out of band
+	// (thread properties) do; others put them above the body.
+	UpsertComment(c Comment) (string, error)
 	// PRsForCommit lists the PRs associated with sha, such as the PR that merged it.
 	PRsForCommit(sha string) ([]PR, error)
 	// BranchHead is the current head commit of branch (short name).
@@ -31,10 +48,12 @@ type VCS interface {
 
 // Config selects and configures a repo-host adapter.
 type Config struct {
-	Name   string // adapter name; "" picks github, or none without a repo
-	Repo   string // host-specific repo id (owner/repo on GitHub)
-	API    *Client
-	Author string // login that owns tfpr's comments; "" is the host default
+	Name   string // adapter name: github, azure, none; "" picks github, or none without a repo
+	Repo   string // host-specific repo id: owner/repo on GitHub, <project>/<repository> on Azure Repos
+	URL    string // API base URL: GitHub's API ("" for api.github.com), or the Azure DevOps collection
+	Token  string
+	Author string // GitHub: the login that owns tfpr's comments; "" is the default
+	Ack    bool   // Azure Repos: plan threads wait for a reviewer (see Azure)
 }
 
 // New returns the adapter named by cfg.Name.
@@ -48,7 +67,12 @@ func New(cfg Config) (VCS, error) {
 	}
 	switch name {
 	case "github":
-		return NewGitHub(cfg.API, cfg.Repo, cfg.Author), nil
+		return NewGitHub(NewGitHubClient(cfg.URL, cfg.Token), cfg.Repo, cfg.Author), nil
+	case "azure":
+		if cfg.URL == "" || !strings.Contains(cfg.Repo, "/") {
+			return nil, fmt.Errorf("Azure Repos needs the collection URL and <project>/<repository> (got '%s', '%s')", cfg.URL, cfg.Repo)
+		}
+		return NewAzure(NewAzureClient(cfg.URL, cfg.Token), cfg.Repo, cfg.Ack), nil
 	case "none":
 		return NoPR{}, nil
 	}

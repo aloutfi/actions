@@ -479,7 +479,7 @@ const recordLimit = 8000
 // Record is the comment record: one hidden line that a later stage (the
 // merge-time gate) reads back from the bot's own comment.
 func Record(r PlanResult) string {
-	apply, provisional, fps := []string{}, []string{}, make([]string, 0, len(r.Units))
+	apply, provisional := []string{}, []string{}
 	for _, u := range r.Units {
 		if u.Status != StatusExcluded && !u.Skippable {
 			apply = append(apply, u.Path)
@@ -487,7 +487,6 @@ func Record(r PlanResult) string {
 		if u.Provisional {
 			provisional = append(provisional, u.Path)
 		}
-		fps = append(fps, u.Path+" "+u.Fingerprint)
 	}
 	planset := ""
 	if r.Planset != nil {
@@ -507,13 +506,23 @@ func Record(r PlanResult) string {
 		Run         string   `json:"run"`
 		Attempt     int      `json:"attempt"`
 	}{r.Target.Key, r.Source.SHA, r.Source.Tree, r.Summary.ExitCode, r.Summary.Status, len(r.Units),
-		apply, provisional, planset, Fingerprint(strings.Join(fps, "\n") + "\n"), r.Run.ID, r.Run.Attempt}
+		apply, provisional, planset, RunFingerprint(r), r.Run.ID, r.Run.Attempt}
 	line := recordLine(rec)
 	if len(line) > recordLimit {
 		rec.Apply = "all" // fails open: the gate applies every unit
 		line = recordLine(rec)
 	}
 	return line
+}
+
+// RunFingerprint identifies everything that was planned: sha256 over the
+// sorted "<path> <unit fingerprint>" lines.
+func RunFingerprint(r PlanResult) string {
+	lines := make([]string, 0, len(r.Units))
+	for _, u := range r.Units {
+		lines = append(lines, u.Path+" "+u.Fingerprint)
+	}
+	return Fingerprint(strings.Join(lines, "\n") + "\n")
 }
 
 // recordLine marshals with HTML escaping on, so no "-->" can end the comment early.

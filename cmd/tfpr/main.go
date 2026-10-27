@@ -53,13 +53,18 @@
 //	TFPR_PLAN_RUN_ID                apply: run that produced the planfile (comment only)
 //	TFPR_LOCK_TIMEOUT               apply: -lock-timeout (5m)
 //	TFPR_PLAN_WORKFLOW              resolve-plan-run: plan workflow file name
-//	TFPR_VCS                        repo host: github (default), or none
-//	TFPR_REPO                       repo id for the repo host (the CI's repository)
+//	TFPR_VCS                        repo host: github, azure or none (default: where
+//	                                the CI says the repo lives, else github)
+//	TFPR_REPO                       repo id for the repo host (the CI's repository):
+//	                                owner/repo, or <project>/<repository> on Azure Repos
+//	TFPR_ACK                        Azure Repos: keep a reviewer's resolution of a plan
+//	                                thread until the plan changes (false)
 //	TFPR_OUTPUT_FILE                step-output file outside a supported CI (stdout)
 //
 // The GitHub adapters authenticate with TFPR_GITHUB_TOKEN (outside the
 // actions: GH_TOKEN or GITHUB_TOKEN) against GITHUB_API_URL
-// (https://api.github.com). terraform never sees any TFPR_* variable, so the
+// (https://api.github.com). Azure Repos uses TFPR_ADO_TOKEN (map
+// $(System.AccessToken) to it) against the build's collection. terraform never sees any TFPR_* variable, so the
 // token the actions pass stays out of it; a GITHUB_TOKEN the caller sets for
 // the GitHub provider still reaches it.
 package main
@@ -177,13 +182,22 @@ func (a *app) loadCI() {
 	a.ctx = a.ci.Context()
 }
 
+// loadVCS picks the repo host: TFPR_VCS, else the one the CI says the repo
+// lives on (Azure Pipelines can build Azure Repos or GitHub repos), else
+// GitHub. Each host gets only its own token.
 func (a *app) loadVCS() (vcs.VCS, error) {
-	return vcs.New(vcs.Config{
-		Name:   os.Getenv("TFPR_VCS"),
+	cfg := vcs.Config{
+		Name:   envOr("TFPR_VCS", a.ctx.VCS),
 		Repo:   a.repo(),
-		API:    a.api,
 		Author: os.Getenv("TFPR_COMMENT_AUTHOR"),
-	})
+		Ack:    os.Getenv("TFPR_ACK") == "true",
+	}
+	if cfg.Name == "azure" {
+		cfg.URL, cfg.Token = a.ctx.VCSURL, os.Getenv("TFPR_ADO_TOKEN")
+	} else {
+		cfg.URL, cfg.Token = os.Getenv("GITHUB_API_URL"), githubToken()
+	}
+	return vcs.New(cfg)
 }
 
 func (a *app) repo() string { return envOr("TFPR_REPO", a.ctx.Repo) }
@@ -468,7 +482,10 @@ func (a *app) comment() error {
 // postPlanComment upserts the rendered plan comment.
 func (a *app) postPlanComment(v vcs.VCS, pr string, r core.PlanResult, marker, record string, body redact.Text, missing bool) error {
 	// Best effort: a comment API failure shouldn't hide the plan's own result.
-	msg, err := v.UpsertComment(pr, marker, record, body)
+	msg, err := v.UpsertComment(vcs.Comment{
+		PR: pr, Marker: marker, Record: record, Body: body,
+		Resolved: r.Summary.Status == core.StatusNoOp, Fingerprint: core.RunFingerprint(r),
+	})
 	switch {
 	case err != nil && r.Summary.Status == core.StatusError:
 		fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
@@ -660,7 +677,7 @@ func (a *app) postApplyComment(v vcs.VCS, d core.Decision, code int, used, usePl
 	if err != nil {
 		return err
 	}
-	msg, err := v.UpsertComment(pr, core.ApplyMarker(a.stack, a.workspace), "", body)
+	msg, err := v.UpsertComment(vcs.Comment{PR: pr, Marker: core.ApplyMarker(a.stack, a.workspace), Body: body, Resolved: true})
 	if err != nil {
 		return err
 	}

@@ -64,17 +64,19 @@ func Compose(marker, record string, body redact.Text) string {
 }
 
 // UpsertComment edits the first comment by the adapter's author that starts
-// with marker, or posts a new one. A human who pastes the marker into their
-// own comment never has it overwritten.
-func (g *GitHub) UpsertComment(pr, marker, record string, body redact.Text) (string, error) {
+// with the marker, or posts a new one. A human who pastes the marker into
+// their own comment never has it overwritten. GitHub issue comments have no
+// status, so Resolved and Fingerprint don't apply.
+func (g *GitHub) UpsertComment(c Comment) (string, error) {
+	pr, marker := c.PR, c.Marker
 	var id int64
 	// If the listing fails, tfpr cannot know whether its comment exists, and
 	// posting could duplicate it, so it gives up instead.
 	err := GetPages(g.api, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100", g.repo, url.PathEscape(pr)),
 		func(page []issueComment) bool {
-			for _, c := range page {
-				if c.User.Login == g.author && strings.HasPrefix(c.Body, marker) {
-					id = c.ID
+			for _, ic := range page {
+				if ic.User.Login == g.author && strings.HasPrefix(ic.Body, marker) {
+					id = ic.ID
 					return false
 				}
 			}
@@ -83,7 +85,7 @@ func (g *GitHub) UpsertComment(pr, marker, record string, body redact.Text) (str
 	if err != nil {
 		return "", fmt.Errorf("list comments on PR #%s: %w", pr, err)
 	}
-	payload := map[string]string{"body": Compose(marker, record, body)}
+	payload := map[string]string{"body": Compose(marker, c.Record, c.Body)}
 	if id != 0 {
 		if _, err := g.api.Do(http.MethodPatch, fmt.Sprintf("/repos/%s/issues/comments/%d", g.repo, id), payload, nil); err != nil {
 			return "", err

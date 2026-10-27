@@ -139,7 +139,7 @@ func TestUpsertComment(t *testing.T) {
 		}
 	})
 	base = api.BaseURL
-	msg, err := NewGitHub(api, "o/r", "").UpsertComment("42", "<!-- m -->", "", text(t, "new"))
+	msg, err := NewGitHub(api, "o/r", "").UpsertComment(Comment{PR: "42", Marker: "<!-- m -->", Body: text(t, "new")})
 	if err != nil || msg != "Updated comment 6 on PR #42" {
 		t.Fatalf("got %q, %v", msg, err)
 	}
@@ -150,7 +150,7 @@ func TestUpsertComment(t *testing.T) {
 
 	// Another author: nothing of ours exists, so post.
 	s, api = newServer(t, ok(`[{"id":6,"user":{"login":"github-actions[bot]"},"body":"<!-- m -->"}]`))
-	msg, err = NewGitHub(api, "o/r", "my-app[bot]").UpsertComment("42", "<!-- m -->", "", text(t, "b"))
+	msg, err = NewGitHub(api, "o/r", "my-app[bot]").UpsertComment(Comment{PR: "42", Marker: "<!-- m -->", Body: text(t, "b")})
 	if err != nil || msg != "Posted comment on PR #42" {
 		t.Fatalf("got %q, %v", msg, err)
 	}
@@ -161,7 +161,7 @@ func TestUpsertComment(t *testing.T) {
 
 	// A listing failure is returned, and nothing is posted.
 	s, api = newServer(t, ok(`[]`), 404)
-	if _, err := NewGitHub(api, "o/r", "").UpsertComment("42", "m", "", text(t, "b")); err == nil {
+	if _, err := NewGitHub(api, "o/r", "").UpsertComment(Comment{PR: "42", Marker: "m", Body: text(t, "b")}); err == nil {
 		t.Error("want an error when the listing fails")
 	}
 	for _, c := range s.calls {
@@ -172,7 +172,7 @@ func TestUpsertComment(t *testing.T) {
 
 	// A write failure is returned.
 	_, api = newServer(t, ok(`[]`), 200, 403)
-	if _, err := NewGitHub(api, "o/r", "").UpsertComment("42", "m", "", text(t, "b")); err == nil {
+	if _, err := NewGitHub(api, "o/r", "").UpsertComment(Comment{PR: "42", Marker: "m", Body: text(t, "b")}); err == nil {
 		t.Error("want an error when the post fails")
 	}
 }

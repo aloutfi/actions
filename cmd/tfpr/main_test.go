@@ -149,7 +149,9 @@ func newScenario(t *testing.T) *scenario {
 		"TFPR_COMMENT_BUDGET", "TFPR_COMMENT_AUTHOR", "TFPR_USE_PLANFILE", "TFPR_ALLOW_FRESH_PLAN_FALLBACK",
 		"TFPR_PLAN_DIR", "TFPR_PLAN_RUN_ID", "TFPR_LOCK_TIMEOUT", "TFPR_PLAN_WORKFLOW", "TFPR_VCS",
 		"TFPR_REPO", "TFPR_OUTPUT_FILE", "TFPR_DIR", "TFPR_FILTER", "TFPR_PLAN_JSON", "TFPR_PLAN_TXT", "TFPR_PLANFILE",
-		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED", "FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY"} {
+		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED", "FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY",
+		"TFPR_ADO_TOKEN", "TFPR_ACK", "TF_BUILD", "BUILD_REPOSITORY_PROVIDER", "SYSTEM_COLLECTIONURI",
+		"SYSTEM_PULLREQUEST_PULLREQUESTID", "SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "SYSTEM_PULLREQUEST_SOURCECOMMITID"} {
 		env[k] = ""
 	}
 	return &scenario{t: t, ws: ws, gh: gh, env: env}
@@ -1001,6 +1003,93 @@ func TestFileSHA256(t *testing.T) {
 	must(t, err)
 	_, err = fileSHA256(filepath.Join(t.TempDir(), "missing"))
 	eq(t, "missing file", true, err != nil)
+}
+
+// azure turns a scenario into an Azure Pipelines PR build of a repo on
+// provider (TfsGit or GitHub).
+func (s *scenario) azure(provider string) *scenario {
+	return s.set("GITHUB_ACTIONS", "", "TF_BUILD", "True", "BUILD_REPOSITORY_PROVIDER", provider,
+		"BUILD_BUILDID", "812", "SYSTEM_JOBATTEMPT", "1", "SYSTEM_TEAMPROJECT", "proj",
+		"SYSTEM_TEAMPROJECTID", "proj", "BUILD_REPOSITORY_ID", "repo", "BUILD_REPOSITORY_NAME", "o/r",
+		"BUILD_SOURCEBRANCH", "refs/pull/7/merge", "BUILD_SOURCEVERSION", "mergecommit",
+		"SYSTEM_PULLREQUEST_SOURCECOMMITID", "abc", "SYSTEM_PULLREQUEST_PULLREQUESTID", "7",
+		"SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "42")
+}
+
+// The Bridge payoff: Azure Pipelines building a GitHub repo comments through
+// the GitHub adapter, with no code written for the combination.
+func TestAzurePipelinesWithGitHubRepo(t *testing.T) {
+	s := newScenario(t).azure("GitHub").set("SYSTEM_COLLECTIONURI", "https://dev.azure.example/org/",
+		"TFPR_GITHUB_TOKEN", "gh-token")
+	s.byo("changes")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "comments on the GitHub PR number", r.api, "POST /repos/o/r/issues/42/comments")
+	eq(t, "with the GitHub token", "Bearer gh-token", s.gh.auth)
+	has(t, "links the Azure run", r.body, "https://dev.azure.example/org/proj/_build/results?buildId=812")
+	has(t, "records the PR head", r.body, `"sha":"abc"`)
+}
+
+// fakeAzureRepos records thread creation on an empty PR.
+type fakeAzureRepos struct {
+	mu      sync.Mutex
+	auth    string
+	created map[string]any
+	calls   []string
+}
+
+func (f *fakeAzureRepos) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.auth = r.Header.Get("Authorization")
+	f.calls = append(f.calls, r.Method+" "+r.URL.Path)
+	switch {
+	case r.URL.Path == "/org/_apis/connectionData":
+		io.WriteString(w, `{"authenticatedUser":{"id":"build-id"}}`)
+	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads" && r.Method == http.MethodGet:
+		io.WriteString(w, `{"value":[]}`)
+	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads":
+		_ = json.NewDecoder(r.Body).Decode(&f.created)
+		io.WriteString(w, `{"id":1}`)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// Azure Pipelines building an Azure Repos repo: outputs are logging
+// commands, and the plan lands in a PR thread whose properties carry the
+// marker and record.
+func TestAzureReposComment(t *testing.T) {
+	ado := &fakeAzureRepos{}
+	srv := httptest.NewServer(ado)
+	t.Cleanup(srv.Close)
+	s := newScenario(t).azure("TfsGit").set("SYSTEM_COLLECTIONURI", srv.URL+"/org/", "TFPR_ADO_TOKEN", "ado-token")
+	r := s.byo("no-changes")
+	has(t, "derive: outputs are logging commands", r.out, "##vso[task.setvariable variable=exit_code;isOutput=true]0\n")
+
+	r = s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "says so", r.out, "Posted thread on PR #7")
+	eq(t, "with the Azure token", "Bearer ado-token", ado.auth)
+	eq(t, "no-op plans start closed", "closed", ado.created["status"])
+	props := ado.created["properties"].(map[string]any)
+	eq(t, "marker property", "<!-- tf-plan:stack :: default -->", props["tfpr.marker"].(map[string]any)["$value"])
+	has(t, "record property", props["tfpr.record"].(map[string]any)["$value"].(string), `"status":"no_op"`)
+	content := ado.created["comments"].([]any)[0].(map[string]any)["content"].(string)
+	lacks(t, "no hidden markup in the text", content, "<!--")
+	has(t, "the plan", content, "Terraform Plan")
+	eq(t, "no GitHub calls", "", r.api)
+}
+
+func TestAzureTokenNeverReachesTerraform(t *testing.T) {
+	s := newScenario(t).azure("TfsGit").set("SYSTEM_COLLECTIONURI", "https://dev.azure.example/org/",
+		"TFPR_ADO_TOKEN", "ado-token", "FAKE_TF_PLAN", filepath.Join(root, "test", "fixtures", "render", "changes"), "FAKE_TF_PLAN_CODE", "2")
+	r := s.run("plan")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "outputs", r.out, "##vso[task.setvariable variable=has_changes;isOutput=true]true")
+	env, err := os.ReadFile(s.env["FAKE_LOG"] + ".env")
+	must(t, err)
+	lacks(t, "terraform env", string(env), "ado-token")
 }
 
 func TestUsage(t *testing.T) {
