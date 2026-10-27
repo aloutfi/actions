@@ -1065,12 +1065,31 @@ func TestGitHubEnterpriseNeedsItsAPI(t *testing.T) {
 	has(t, "with the URL: comments", r.api, "POST /repos/o/r/issues/42/comments")
 }
 
+// The apply result on Azure Repos: a successful apply's thread is closed, a
+// failed one stays active.
+func TestAzureApplyThreadStatus(t *testing.T) {
+	for code, want := range map[string]string{"0": "closed", "3": "active"} {
+		ado := &fakeAzureRepos{}
+		srv := httptest.NewServer(ado)
+		s := newScenario(t)
+		s.azure("TfsGit").set("SYSTEM_COLLECTIONURI", srv.URL+"/org/", "TFPR_ADO_TOKEN", "t",
+			"BUILD_SOURCEBRANCH", "refs/heads/main", "SYSTEM_PULLREQUEST_SOURCECOMMITID", "", "SYSTEM_PULLREQUEST_PULLREQUESTID", "",
+			"BUILD_SOURCEVERSION", "squash1", "FAKE_TF_APPLY_CODE", code)
+		ado.mergedPR = 7
+		r := s.run("apply")
+		eq(t, "apply "+code+": thread status", any(want), ado.created["status"])
+		has(t, "apply "+code+": posted", r.out, "Posted thread on PR #7")
+		srv.Close()
+	}
+}
+
 // fakeAzureRepos records thread creation on an empty PR.
 type fakeAzureRepos struct {
-	mu      sync.Mutex
-	auth    string
-	created map[string]any
-	calls   []string
+	mergedPR int // the PR that commit squash1 merged into main, if any
+	mu       sync.Mutex
+	auth     string
+	created  map[string]any
+	calls    []string
 }
 
 func (f *fakeAzureRepos) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1081,6 +1100,10 @@ func (f *fakeAzureRepos) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/org/_apis/connectionData":
 		io.WriteString(w, `{"authenticatedUser":{"id":"build-id"}}`)
+	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullrequestquery":
+		fmt.Fprintf(w, `{"results":[{"squash1":[{"pullRequestId":%d,"lastMergeSourceCommit":{"commitId":"head"}}]}]}`, f.mergedPR)
+	case strings.HasSuffix(r.URL.Path, "/refs"):
+		io.WriteString(w, `{"value":[{"name":"refs/heads/main","objectId":"squash1"}]}`)
 	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads" && r.Method == http.MethodGet:
 		io.WriteString(w, `{"value":[]}`)
 	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads":

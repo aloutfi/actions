@@ -712,7 +712,8 @@ func (a *app) postApplyComment(v vcs.VCS, d core.Decision, code int, used, usePl
 	if err != nil {
 		return err
 	}
-	msg, err := v.UpsertComment(vcs.Comment{PR: pr, Marker: core.ApplyMarker(a.stack, a.workspace), Body: body, Resolved: true})
+	// A failed apply needs attention: its thread stays active.
+	msg, err := v.UpsertComment(vcs.Comment{PR: pr, Marker: core.ApplyMarker(a.stack, a.workspace), Body: body, Resolved: code == 0})
 	if err != nil {
 		return err
 	}

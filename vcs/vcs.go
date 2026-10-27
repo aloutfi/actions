@@ -23,8 +23,8 @@ type Comment struct {
 	Record string // the comment record; tfpr's own, never filtered; "" for none
 	// Body is the human-readable part. Only the redaction filter makes one.
 	Body redact.Text
-	// Resolved means there is nothing to review: a no-op plan or an apply
-	// result. Hosts with thread status close the thread.
+	// Resolved means there is nothing to review: a no-op plan or a
+	// successful apply. Hosts with thread status close the thread.
 	Resolved bool
 	// Fingerprint identifies what was planned. With the ack option, a
 	// changed fingerprint reopens a thread a reviewer had resolved.
