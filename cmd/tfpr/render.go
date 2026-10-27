@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -51,19 +52,32 @@ func (a *app) renderPlan(r core.PlanResult, texts map[string]string, links core.
 		Budget:        limit - head,
 		KeepUnchanged: os.Getenv("TFPR_KEEP_UNCHANGED") == "true",
 	}
+	body, size, err := a.renderFiltered(c, core.RenderPlan, utf8.RuneCountInString)
+	if err == nil && size > c.Budget {
+		err = fmt.Errorf("the filtered plan comment is %d characters, over its %d-character budget", size, c.Budget)
+	}
+	if err != nil {
+		return body, "", "", err
+	}
+	return body, marker, record, nil
+}
+
+// renderFiltered renders c and passes it through the filter. If the result
+// measures over c.Budget, it renders and filters the minimal layout once
+// instead. It returns the filtered text and its size, which may still be
+// over budget.
+func (a *app) renderFiltered(c core.PlanComment, render func(core.PlanComment) (string, error), measure func(string) int) (redact.Text, int, error) {
 	for {
-		raw, err := core.RenderPlan(c)
+		raw, err := render(c)
 		if err != nil {
-			return body, "", "", err
+			return redact.Text{}, 0, err
 		}
-		if body, err = a.filter.Apply(raw); err != nil {
-			return body, "", "", err
+		text, err := a.filter.Apply(raw)
+		if err != nil {
+			return text, 0, err
 		}
-		if n := utf8.RuneCountInString(body.String()); n <= c.Budget || c.Minimal {
-			if n > c.Budget {
-				return body, "", "", fmt.Errorf("the filtered plan comment is %d characters, over its %d-character budget", n, c.Budget)
-			}
-			return body, marker, record, nil
+		if n := measure(text.String()); n <= c.Budget || c.Minimal {
+			return text, n, nil
 		}
 		c.Minimal = true
 	}
@@ -92,26 +106,18 @@ func (a *app) writeSummary(r core.PlanResult, texts map[string]string, links cor
 		return false, nil
 	}
 	host := core.HostFor(a.ctx.CI)
-	c := core.PlanComment{Result: r, Texts: texts, Host: host, Links: links}
-	var text redact.Text
-	for {
-		raw, err := core.RenderSummary(c)
-		if err != nil {
-			a.ci.Log(ci.Warning, "Could not render the job summary: "+err.Error())
-			return false, nil
-		}
-		if text, err = a.filter.Apply(raw); err != nil {
-			return false, err
-		}
-		if len(text.String()) <= host.MaxSummary {
-			break
-		}
-		if c.Minimal {
-			a.ci.Log(ci.Warning, fmt.Sprintf("Not writing the job summary: even its minimal layout is %d bytes after the filter, over the %d-byte limit.",
-				len(text.String()), host.MaxSummary))
-			return false, nil
-		}
-		c.Minimal = true
+	c := core.PlanComment{Result: r, Texts: texts, Host: host, Links: links, Budget: host.MaxSummary}
+	text, size, err := a.renderFiltered(c, core.RenderSummary, func(s string) int { return len(s) })
+	switch {
+	case errors.Is(err, redact.ErrFailed):
+		return false, err
+	case err != nil:
+		a.ci.Log(ci.Warning, "Could not render the job summary: "+err.Error())
+		return false, nil
+	case size > host.MaxSummary:
+		a.ci.Log(ci.Warning, fmt.Sprintf("Not writing the job summary: even its minimal layout is %d bytes after the filter, over the %d-byte limit.",
+			size, host.MaxSummary))
+		return false, nil
 	}
 	if err := a.ci.UploadSummary(text); err != nil {
 		a.ci.Log(ci.Warning, "Could not write the job summary: "+err.Error())
