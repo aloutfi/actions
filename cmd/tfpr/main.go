@@ -37,7 +37,8 @@
 //	TFPR_PLAN_TXT_URL               render/comment: link to the plan.txt artifact
 //	TFPR_COMMENT_BUDGET             render/comment: max characters in the whole comment,
 //	                                marker and record included; at most the repo host's
-//	                                limit, which is the default (65536 on GitHub)
+//	                                limit, which is the default (65536 on GitHub), and
+//	                                at least the marker and record plus 1000
 //	TFPR_TEMPLATE                   render/comment: template file whose {{define}}
 //	                                blocks replace the default comment's
 //	TFPR_KEEP_UNCHANGED             render/comment: keep "# (N unchanged ... hidden)"

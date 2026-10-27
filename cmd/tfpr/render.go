@@ -11,6 +11,10 @@ import (
 	"github.com/aloutfi/actions/redact"
 )
 
+// minCommentBody is the smallest body budget tfpr accepts: room for the
+// minimal layout (headline, banner, counts, links).
+const minCommentBody = 1000
+
 // commentHost is the dialect and limits of the repo host the comment goes to.
 func commentHost() core.Host { return core.HostFor(envOr("TFPR_VCS", "github")) }
 
@@ -32,14 +36,19 @@ func (a *app) renderPlan(r core.PlanResult, texts map[string]string, links core.
 		}
 		limit = min(limit, host.MaxComment)
 	}
+	marker, record = core.PlanMarker(r.Target.Stack, r.Target.Workspace), core.Record(r)
+	head := utf8.RuneCountInString(marker+record) + 2 // and two newlines
+	if limit < head+minCommentBody {
+		return body, "", "", fmt.Errorf("TFPR_COMMENT_BUDGET is %d characters; this comment needs at least %d (%d for its marker and record, %d for a minimal body)",
+			limit, head+minCommentBody, head, minCommentBody)
+	}
 	tmpl, err := userTemplate()
 	if err != nil {
 		return body, "", "", err
 	}
-	marker, record = core.PlanMarker(r.Target.Stack, r.Target.Workspace), core.Record(r)
 	c := core.PlanComment{
 		Result: r, Texts: texts, Host: host, Links: links, Template: tmpl,
-		Budget:        limit - utf8.RuneCountInString(marker+record) - 2, // and two newlines
+		Budget:        limit - head,
 		KeepUnchanged: os.Getenv("TFPR_KEEP_UNCHANGED") == "true",
 	}
 	for {

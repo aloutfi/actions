@@ -1099,3 +1099,14 @@ func TestCommentBudgetIsClampedToTheHost(t *testing.T) {
 		t.Errorf("comment is %d characters, over GitHub's 65,536", n)
 	}
 }
+
+// A budget too small for the marker, the record and a minimal body is a
+// configuration error, said plainly.
+func TestCommentBudgetTooSmall(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_COMMENT_BUDGET", "100")
+	s.byo("changes")
+	r := s.run("comment")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "says why", r.out, "TFPR_COMMENT_BUDGET is 100 characters; this comment needs at least")
+	lacks(t, "posts nothing", r.api, "POST")
+}
