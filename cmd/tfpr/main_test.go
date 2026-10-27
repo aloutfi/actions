@@ -23,6 +23,7 @@ type fakeGitHub struct {
 	branchHead string
 	planRun    string
 	failWrites bool
+	failList   bool // listing comments fails
 	comments   string // JSON for the PR's existing comments
 
 	mu    sync.Mutex
@@ -52,6 +53,10 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(p, "/jobs"):
 		io.WriteString(w, `{"jobs":[{"id":7,"runner_name":"other"},{"id":8,"runner_name":null}]}`)
 	case strings.HasSuffix(p, "/comments"):
+		if f.failList {
+			http.Error(w, `{"message":"boom"}`, http.StatusNotFound)
+			return
+		}
 		io.WriteString(w, f.comments)
 	case strings.HasSuffix(p, "/pulls"):
 		if f.pr == "" {
@@ -327,6 +332,18 @@ func TestCommentUpdatesOwnComment(t *testing.T) {
 	r := s.run("comment")
 	has(t, "patches its own", r.api, "PATCH /repos/o/r/issues/comments/6")
 	has(t, "says so", r.out, "Updated comment 6 on PR #42")
+}
+
+// If the existing comments cannot be listed, posting could duplicate one, so
+// the comment is skipped with a warning.
+func TestCommentSkipsWhenListingFails(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_EXIT_CODE", "0")
+	s.copyFixture("no-changes")
+	s.gh.failList = true
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "warns", r.out, "::warning::Could not post the plan comment on PR #42")
+	lacks(t, "does not post", r.api, "POST")
 }
 
 func TestCommentSkipsNonPR(t *testing.T) {

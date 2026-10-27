@@ -56,9 +56,9 @@ type issueComment struct {
 // own comment never has it overwritten.
 func (g *GitHub) UpsertComment(pr, marker, body string) (string, error) {
 	var id int64
-	// A failed listing falls through to posting a new comment: a duplicate
-	// comment is better than none.
-	_ = GetPages(g.api, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100", g.repo, url.PathEscape(pr)),
+	// If the listing fails, tfpr cannot know whether its comment exists, and
+	// posting could duplicate it, so it gives up instead.
+	err := GetPages(g.api, fmt.Sprintf("/repos/%s/issues/%s/comments?per_page=100", g.repo, url.PathEscape(pr)),
 		func(page []issueComment) bool {
 			for _, c := range page {
 				if c.User.Login == g.author && strings.HasPrefix(c.Body, marker) {
@@ -68,6 +68,9 @@ func (g *GitHub) UpsertComment(pr, marker, body string) (string, error) {
 			}
 			return true
 		})
+	if err != nil {
+		return "", fmt.Errorf("list comments on PR #%s: %w", pr, err)
+	}
 	payload := map[string]string{"body": body}
 	if id != 0 {
 		if _, err := g.api.Do(http.MethodPatch, fmt.Sprintf("/repos/%s/issues/comments/%d", g.repo, id), payload, nil); err != nil {

@@ -146,6 +146,17 @@ func TestUpsertComment(t *testing.T) {
 		t.Errorf("last call: %q", last)
 	}
 
+	// A listing failure is returned, and nothing is posted.
+	s, api = newServer(t, ok(`[]`), 404)
+	if _, err := NewGitHub(api, "o/r", "").UpsertComment("42", "m", "b"); err == nil {
+		t.Error("want an error when the listing fails")
+	}
+	for _, c := range s.calls {
+		if strings.HasPrefix(c, "POST") {
+			t.Errorf("posted after a failed listing: %s", c)
+		}
+	}
+
 	// A write failure is returned.
 	_, api = newServer(t, ok(`[]`), 200, 403)
 	if _, err := NewGitHub(api, "o/r", "").UpsertComment("42", "m", "b"); err == nil {
