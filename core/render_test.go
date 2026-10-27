@@ -124,16 +124,22 @@ func TestWaterfill(t *testing.T) {
 	}
 }
 
-// The func map is exactly the six pure functions of architecture §2.3:
-// nothing that reads the environment or files.
+// The func map is the pure functions of architecture §2.3, less html,
+// which is a text/template built-in: nothing that reads the environment or
+// files.
 func TestFuncMapIsSmallAndPure(t *testing.T) {
 	var names []string
 	for name := range funcMap {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	if got := strings.Join(names, " "); got != "code details fence html plural short" {
+	if got := strings.Join(names, " "); got != "code details fence plural short" {
 		t.Errorf("func map: %s", got)
+	}
+	html := template.Must(bind(templates, HostFor("github")).New("x").Parse(`{{html .}}`))
+	var b strings.Builder
+	if err := html.Execute(&b, `a<b>&"c"`); err != nil || b.String() != "a&lt;b&gt;&amp;&#34;c&#34;" {
+		t.Errorf("built-in html: %q %v", b.String(), err)
 	}
 	for _, tmpl := range []string{`{{env "HOME"}}`, `{{readFile "/etc/passwd"}}`, `{{exec "id"}}`} {
 		if _, err := withUser(tmpl); err == nil {

@@ -10,12 +10,12 @@ import (
 	"unicode/utf8"
 )
 
-// funcMap is every function a template can call: pure, no I/O, no access to
-// the environment or files. Keep it this small. details depends on the host
+// funcMap is every function a template can call besides text/template's
+// built-ins (which include html): pure, no I/O, no access to the
+// environment or files. Keep it this small. details depends on the host
 // dialect, so it is bound per render (see funcsFor).
 var funcMap = template.FuncMap{
 	"fence":   fence,
-	"html":    html.EscapeString,
 	"code":    code,
 	"plural":  plural,
 	"details": func(open bool, summary, body string) string { return details(HostFor(""), open, summary, body) },

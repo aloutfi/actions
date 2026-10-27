@@ -135,13 +135,14 @@ blocks get a `PlanView`: `.Result` (the PlanResult), `.Host`, `.Links`
 Both are documented in [core/render.go](../core/render.go).
 
 Templates can call only these functions, besides `text/template`'s
-built-ins. None of them can read the environment or files:
+[built-ins](https://pkg.go.dev/text/template#hdr-Functions). None of them
+can read the environment or files:
 
 | Function | Does |
 |---|---|
 | `fence LANG TEXT` | A fenced code block that TEXT cannot close |
 | `code S` | An inline code span that S cannot close |
-| `html S` | Escapes `&`, `<`, `>`, `"` and `'` |
+| `html S` | Escapes `&`, `<`, `>`, `"` and `'` (the `text/template` built-in) |
 | `plural N WORD` | `1 resource`, `3,000 resources` |
 | `details OPEN SUMMARY BODY` | A `<details>` block where the host renders one, else a heading; escapes SUMMARY |
 | `short SHA` | The first 7 characters |
