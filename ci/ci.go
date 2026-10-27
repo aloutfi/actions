@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/aloutfi/actions/redact"
 	"github.com/aloutfi/actions/vcs"
 )
 
@@ -41,6 +42,15 @@ type CI interface {
 	// commands, for echoing text tfpr does not control (terraform output, a
 	// rendered comment). Close ends the inert region; it does not close w.
 	Inert(w io.Writer) io.WriteCloser
+	// UploadSummary publishes markdown as the job's summary page. Only the
+	// redaction filter makes a redact.Text.
+	UploadSummary(markdown redact.Text) error
+}
+
+// SummaryLinker is a CI whose job summary has a URL of its own. A CI without
+// one gets no summary link in the comment.
+type SummaryLinker interface {
+	SummaryURL() string
 }
 
 // Env reads an environment variable; os.Getenv in production.

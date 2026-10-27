@@ -1,67 +1,61 @@
 <!-- tf-plan:truncated :: default -->
 <!-- tfpr:plan@1 {"key":"truncated:default","sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:458f12ab4b9a187645281d29abf2db46c3396fdbcbf8e05e1af8ec127ada5756","run":"","attempt":0} -->
-<details open>
-<summary>📝 <b>Terraform Plan</b> — <code>truncated</code> (<code>default</code>) — 40 to add, 0 to change, 2 to destroy, 0 to replace, 0 to import</summary>
+### ⚠️ Terraform plan · `truncated` (`default`) · 40 to add, 0 to change, 2 to destroy
+> **Plan text truncated**: showing 2,825 of 8,766 characters.
+> **Resource list shortened**: every delete, replace and forget is listed; 2 lower-risk lines are counted, not listed.
+> Full plan: [job summary](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · [job log](https://ci.example/run/1234/job/5678)
+> Redaction: no redaction filter configured
 
-**Exit code:** `2`  
-**Job:** [#1234](https://ci.example/run/1234/job/5678)
+| Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 40 | 0 | 2 | 0 | 0 | 0 | 0 | 1 | 0 |
 
-| Add | Change | Destroy | Replace | **Import** | Forget | Move | Outputs |
-|---|---|---|---|---|---|---|---|
-| 40 | 0 | 2 | 0 | **0** | 0 | 0 | 1 |
-
-<details open><summary>🚦 Diff summary</summary>
-
+**Resources (42)**
 ```diff
-- terraform_data.item["alpha"] will be destroyed
-# (because key ["alpha"] is not in for_each map)
-- terraform_data.item["beta"] will be destroyed
-# (because key ["beta"] is not in for_each map)
-+ terraform_data.item["item01"] will be created
-+ terraform_data.item["item02"] will be created
-+ terraform_data.item["item03"] will be created
-+ terraform_data.item["item04"] will be created
-+ terraform_data.item["item05"] will be created
-+ terraform_data.item["item06"] will be created
-+ terraform_data.item["item07"] will be created
-+ terraform_data.item["item08"] will be created
-+ terraform_data.item["item09"] will be created
-+ terraform_data.item["item10"] will be created
-+ terraform_data.item["item11"] will be created
-+ terraform_data.item["item12"] will be created
-+ terraform_data.item["item13"] will be created
-+ terraform_data.item["item14"] will be created
-+ terraform_data.item["item15"] will be created
-+ terraform_data.item["item16"] will be created
-+ terraform_data.item["item17"] will be created
-+ terraform_data.item["item18"] will be created
-+ terraform_data.item["item19"] will be created
-+ terraform_data.item["item20"] will be created
-+ terraform_data.item["item21"] will be created
-+ terraform_data.item["item22"] will be created
-+ terraform_data.item["item23"] will be created
-+ terraform_data.item["item24"] will be created
-+ terraform_data.item["item25"] will be created
-+ terraform_data.item["item26"] will be created
-+ terraform_data.item["item27"] will be created
-+ terraform_data.item["item28"] will be created
-+ terraform_data.item["item29"] will be created
-+ terraform_data.item["item30"] will be created
-+ terraform_data.item["item31"] will be created
-+ terraform_data.item["item32"] will be created
-+ terraform_data.item["item33"] will be created
-+ terraform_data.item["item34"] will be created
-+ terraform_data.item["item35"] will be created
-+ terraform_data.item["item36"] will be created
-+ terraform_data.item["item37"] will be created
-+ terraform_data.item["item38"] will be created
-+ terraform_data.item["item39"] will be created
-+ terraform_data.item["item40"] will be created
+-   terraform_data.item["alpha"]   delete
+-   terraform_data.item["beta"]    delete
++   terraform_data.item["item01"]  create
++   terraform_data.item["item02"]  create
++   terraform_data.item["item03"]  create
++   terraform_data.item["item04"]  create
++   terraform_data.item["item05"]  create
++   terraform_data.item["item06"]  create
++   terraform_data.item["item07"]  create
++   terraform_data.item["item08"]  create
++   terraform_data.item["item09"]  create
++   terraform_data.item["item10"]  create
++   terraform_data.item["item11"]  create
++   terraform_data.item["item12"]  create
++   terraform_data.item["item13"]  create
++   terraform_data.item["item14"]  create
++   terraform_data.item["item15"]  create
++   terraform_data.item["item16"]  create
++   terraform_data.item["item17"]  create
++   terraform_data.item["item18"]  create
++   terraform_data.item["item19"]  create
++   terraform_data.item["item20"]  create
++   terraform_data.item["item21"]  create
++   terraform_data.item["item22"]  create
++   terraform_data.item["item23"]  create
++   terraform_data.item["item24"]  create
++   terraform_data.item["item25"]  create
++   terraform_data.item["item26"]  create
++   terraform_data.item["item27"]  create
++   terraform_data.item["item28"]  create
++   terraform_data.item["item29"]  create
++   terraform_data.item["item30"]  create
++   terraform_data.item["item31"]  create
++   terraform_data.item["item32"]  create
++   terraform_data.item["item33"]  create
++   terraform_data.item["item34"]  create
++   terraform_data.item["item35"]  create
++   terraform_data.item["item36"]  create
++   terraform_data.item["item37"]  create
++   terraform_data.item["item38"]  create
 ```
++ 2 more `create` lines
 
-</details>
-
-<details open><summary>⚙️ Full terraform plan output</summary>
+<details><summary>Plan output for truncated (truncated: 2,825 of 8,766 characters)</summary>
 
 ```terraform
 
@@ -131,11 +125,39 @@ Terraform will perform the following actions:
     }
 
   # terraform_data.item["item07"] will be created
-  + r
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-07"
+      + output = (known after apply)
+    }
 
-[truncated — download the tfplan artifact and run `terraform show tfplan` for full output]
+  # terraform_data.item["item08"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-08"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item09"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-09"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item10"] will be created
+  + resource "terraform_data" "item" {
+      + id     = (known after apply)
+      + input  = "value-10"
+      + output = (known after apply)
+    }
+
+  # terraform_data.item["item11"] will be created
+  + resource "terraform_data" "item" {
 ```
 
 </details>
 
-</details>
+Outputs: `item_count` (update)
+
+[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · tfpr dev · redaction: none

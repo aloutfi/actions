@@ -43,9 +43,15 @@ assert_lacks() {
   if [[ "$2" != *"$3"* ]]; then pass; else fail "$1: expected not to contain '$3' in:"$'\n'"$2"; fi
 }
 
-# assert_golden NAME FILE ACTUAL: ACTUAL equals test/fixtures/FILE.
+# assert_golden NAME FILE ACTUAL: ACTUAL equals test/fixtures/FILE. A FILE
+# ending in .gz is compared unzipped (large fixtures).
 assert_golden() {
   local golden="${root}/test/fixtures/$2"
+  if [[ "${golden}" == *.gz ]]; then
+    if [[ "${update}" == "true" ]]; then gzip -9n < "$3" > "${golden}"; fi
+    if gunzip -c "${golden}" | diff -u - "$3" > /dev/null; then pass; else fail "$1 (gunzip -c ${golden} | diff - $3)"; fi
+    return
+  fi
   if [[ "${update}" == "true" ]]; then cp "$3" "${golden}"; fi
   if diff -u "${golden}" "$3"; then pass; else fail "$1"; fi
 }
@@ -56,30 +62,54 @@ cases() { grep -v '^#' "${root}/test/cases/$1" | tr '\t' '\037'; }
 
 # --- derive + render golden files --------------------------------------------
 # Each fixture is a plan the caller made itself: derive writes the plan dir
-# (golden plan-result.json), render prints the comment (golden expected.md).
+# (golden plan-result.json), render prints the comment (golden expected.md),
+# and comment, outside a PR, writes the job summary (golden summary.md).
+# Optional files: stack (the stack name, when it is not the directory name)
+# and budget (TFPR_COMMENT_BUDGET). Large fixtures are gzipped, goldens too.
+links=(TFPR_JOB_URL="https://ci.example/run/1234/job/5678" TFPR_SUMMARY_URL="https://ci.example/run/1234#summary"
+  TFPR_PLAN_TXT_URL="https://ci.example/run/1234/artifacts/plan.txt")
 cd "${root}/test/fixtures/render"
 for dir in */; do
   name="${dir%/}"
-  budget=45000
+  stack="${name}" budget="" gz=""
+  [[ -f "${name}/stack" ]] && stack="$(cat "${name}/stack")"
   [[ -f "${name}/budget" ]] && budget="$(cat "${name}/budget")"
+  plan_json="${name}/plan.json" plan_txt="${name}/plan.txt"
+  if [[ -f "${name}/plan.json.gz" ]]; then
+    gz=.gz plan_json="${sandbox}/plan.json" plan_txt="${sandbox}/plan.txt"
+    gunzip -c "${name}/plan.json.gz" > "${plan_json}"
+    gunzip -c "${name}/plan.txt.gz" > "${plan_txt}"
+  fi
   rm -rf "${sandbox}/plandir"
-  env -i PATH="${PATH}" TFPR_STACK="${name}" TFPR_WORKSPACE=default TFPR_DIR="${sandbox}/plandir" \
-    TFPR_PLAN_JSON="${name}/plan.json" TFPR_PLAN_TXT="${name}/plan.txt" TFPR_EXIT_CODE="$(cat "${name}/exit_code")" \
+  env -i PATH="${PATH}" TFPR_STACK="${stack}" TFPR_WORKSPACE=default TFPR_DIR="${sandbox}/plandir" \
+    TFPR_PLAN_JSON="${plan_json}" TFPR_PLAN_TXT="${plan_txt}" TFPR_EXIT_CODE="$(cat "${name}/exit_code")" \
     "${tfpr}" derive > /dev/null 2>&1 || fail "derive ${name}"
   # The tfpr version is the only field that depends on the build.
   sed 's/"version": "[^"]*"/"version": "<version>"/' "${sandbox}/plandir/plan-result.json" > "${sandbox}/plan-result.json"
-  assert_golden "derive ${name}" "render/${name}/plan-result.json" "${sandbox}/plan-result.json"
-  env -i PATH="${PATH}" TFPR_DIR="${sandbox}/plandir" \
-    TFPR_RUN_ID=1234 TFPR_JOB_URL="https://ci.example/run/1234/job/5678" \
-    TFPR_COMMENT_BUDGET="${budget}" \
+  assert_golden "derive ${name}" "render/${name}/plan-result.json${gz}" "${sandbox}/plan-result.json"
+  env -i PATH="${PATH}" TFPR_DIR="${sandbox}/plandir" "${links[@]}" TFPR_COMMENT_BUDGET="${budget}" \
     "${tfpr}" render > "${sandbox}/render.md"
   assert_golden "render ${name}" "render/${name}/expected.md" "${sandbox}/render.md"
+  env -i PATH="${PATH}" TFPR_DIR="${sandbox}/plandir" TFPR_SUMMARY_FILE="${sandbox}/summary.md" \
+    TFPR_PLAN_TXT_URL="https://ci.example/run/1234/artifacts/plan.txt" "${tfpr}" comment > /dev/null 2>&1 || fail "summary ${name}"
+  assert_golden "summary ${name}" "render/${name}/summary.md${gz}" "${sandbox}/summary.md"
 done
 
-# The over-budget case must actually be over budget and carry the notice.
-if [[ "$(wc -c < truncated/plan.txt)" -gt "$(cat truncated/budget)" ]]; then pass; else
-  fail "truncated fixture is not over its budget"; fi
-if grep -q '^\[truncated' truncated/expected.md; then pass; else fail "truncation notice missing"; fi
+# The truncated and large fixtures must be cut, and say so up front: the
+# banner is within the comment's first five lines, every delete is listed,
+# and the whole comment fits GitHub's limit.
+for name in truncated large; do
+  if head -n 5 "${name}/expected.md" | grep -q '^> \*\*Plan text truncated\*\*'; then pass; else
+    fail "${name}: no truncation banner in the first five lines"; fi
+done
+# Bytes bound characters from above.
+size="$(wc -c < large/expected.md | tr -d ' ')"
+if [[ "${size}" -le 65536 ]]; then pass; else fail "large: ${size} bytes, over GitHub's 65,536 characters"; fi
+# shellcheck disable=SC2016 # literal backticks
+list="$(sed -n '/^```diff$/,/^```$/p' large/expected.md)"
+missing_deletes="$(gunzip -c large/plan.txt.gz | sed -n 's/^  # \(.*\) will be destroyed$/\1/p' |
+  while read -r address; do grep -qF -- " ${address} " <<< "${list}" || echo "${address}"; done)"
+assert_eq "large: every destroy is listed" "" "${missing_deletes}"
 cd "${root}"
 
 # --- commands with a stub terraform ------------------------------------------
@@ -161,7 +191,8 @@ run_tfpr derive TFPR_EXIT_CODE=1
 assert_eq "byo failed plan: exit code" 1 "${RC}"
 assert_has "byo failed plan: status" "$(cat "${ws}/stack/.tfpr/plan-result.json")" '"status": "error"'
 run_tfpr render
-assert_has "byo failed plan: rendered" "${OUT}" "Plan failed for <code>stack</code>"
+# shellcheck disable=SC2016 # literal backticks
+assert_has "byo failed plan: rendered" "${OUT}" '**Plan failed.** Any earlier plan for `stack` is out of date'
 
 # derive refuses plan.json with stderr mixed in.
 { cat "${root}/test/fixtures/render/changes/plan.json"; echo "Warning: from stderr"; } > "${ws}/broken.json"
@@ -241,7 +272,12 @@ assert_eq "plan retention_days default" 'default: "7"' \
 
 # shellcheck disable=SC2016
 assert_yaml "the plan comment runs when the plan failed, not when cancelled" plan/action.yml \
-  "if: \${{ !cancelled() && github.event_name == 'pull_request' }}"
+  'if: ${{ !cancelled() }}'
+# shellcheck disable=SC2016
+assert_yaml "the comment links the plan.txt artifact" plan/action.yml \
+  'TFPR_PLAN_TXT_URL: ${{ steps.plan-text-upload.outputs.artifact-url }}'
+assert_yaml "plan.txt is uploaded unzipped" plan/action.yml 'archive: false'
+
 
 # shellcheck disable=SC2016
 assert_yaml "apply downloads outside the stack" apply/action.yml \

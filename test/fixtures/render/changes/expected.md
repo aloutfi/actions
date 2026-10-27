@@ -1,28 +1,20 @@
 <!-- tf-plan:changes :: default -->
 <!-- tfpr:plan@1 {"key":"changes:default","sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:acfd4def8e7db664efdd945e623d0e762364453f577deaf619bbc4c822e49ec0","run":"","attempt":0} -->
-<details open>
-<summary>📝 <b>Terraform Plan</b> — <code>changes</code> (<code>default</code>) — 1 to add, 1 to change, 1 to destroy, 1 to replace, 0 to import</summary>
+### ⚠️ Terraform plan · `changes` (`default`) · 1 to add, 1 to change, 1 to destroy, 1 to replace
 
-**Exit code:** `2`  
-**Job:** [#1234](https://ci.example/run/1234/job/5678)
+| Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
 
-| Add | Change | Destroy | Replace | **Import** | Forget | Move | Outputs |
-|---|---|---|---|---|---|---|---|
-| 1 | 1 | 1 | 1 | **0** | 0 | 0 | 0 |
-
-<details open><summary>🚦 Diff summary</summary>
-
+**Resources (4)**
 ```diff
-! terraform_data.item["alpha"] will be updated in-place
-- terraform_data.item["beta"] will be destroyed
-# (because key ["beta"] is not in for_each map)
-+ terraform_data.item["gamma"] will be created
-! terraform_data.pinned must be replaced
+-   terraform_data.item["beta"]   delete
+-/+ terraform_data.pinned         replace
+!   terraform_data.item["alpha"]  update
++   terraform_data.item["gamma"]  create
 ```
 
-</details>
-
-<details open><summary>⚙️ Full terraform plan output</summary>
+<details><summary>Plan output for changes</summary>
 
 ```terraform
 
@@ -68,4 +60,4 @@ Plan: 2 to add, 1 to change, 2 to destroy.
 
 </details>
 
-</details>
+[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · tfpr dev · redaction: none

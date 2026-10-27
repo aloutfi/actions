@@ -8,8 +8,10 @@
 //	derive            write the plan dir from a plan the caller produced
 //	                  (TFPR_PLAN_JSON, TFPR_PLAN_TXT): "bring your own plan"
 //	render            print the plan comment body from the plan dir (no CI/VCS calls)
-//	comment           render the plan comment from the plan dir and upsert it on
-//	                  the current PR; a failed or missing plan posts "plan failed"
+//	comment           write the full plan to the job summary, then render the plan
+//	                  comment from the plan dir and upsert it on the current PR; a
+//	                  failed or missing plan posts "plan failed". Outside a PR it
+//	                  writes only the summary
 //	decide            emit whether apply should fetch the planfile artifact
 //	apply             plan-source decision, superseded-tree guard, apply,
 //	                  apply-result comment on the commit's PR
@@ -30,8 +32,19 @@
 //	TFPR_PLAN_JSON, TFPR_PLAN_TXT   derive: terraform show -json / -no-color output
 //	TFPR_EXIT_CODE                  derive: the plan's -detailed-exitcode (optional)
 //	TFPR_PLANFILE                   derive: the binary planfile, hashed (optional)
-//	TFPR_RUN_ID, TFPR_JOB_URL       render: run link (comment fills these in)
-//	TFPR_COMMENT_BUDGET             render: max plan.txt bytes in the comment (45000)
+//	TFPR_JOB_URL, TFPR_SUMMARY_URL  render: job log and job summary links (comment
+//	                                fills these in)
+//	TFPR_PLAN_TXT_URL               render/comment: link to the plan.txt artifact
+//	TFPR_COMMENT_BUDGET             render/comment: max characters in the whole comment,
+//	                                marker and record included; at most the repo host's
+//	                                limit, which is the default (65536 on GitHub), and
+//	                                at least the marker and record plus 1000
+//	TFPR_TEMPLATE                   render/comment: template file whose {{define}}
+//	                                blocks replace the default comment's
+//	TFPR_KEEP_UNCHANGED             render/comment: keep "# (N unchanged ... hidden)"
+//	                                lines in the comment (false)
+//	TFPR_SUMMARY                    comment: write the job summary (true)
+//	TFPR_SUMMARY_FILE               comment, outside a supported CI: summary file
 //	TFPR_COMMENT_AUTHOR             comment/apply: login allowed to own the comment
 //	TFPR_USE_PLANFILE               decide/apply: apply the stored planfile (false)
 //	TFPR_ALLOW_FRESH_PLAN_FALLBACK  apply: fresh-plan if the planfile is missing (false)
@@ -357,7 +370,9 @@ func (a *app) plan() (err error) {
 		return err
 	}
 	stats := core.StatsOf(r.Summary.Counts)
-	fields := append(stats.Fields(), core.Field{Name: "plan_artifact_name", Value: core.ArtifactName(a.stack, a.workspace)})
+	fields := append(stats.Fields(),
+		core.Field{Name: "plan_artifact_name", Value: core.ArtifactName(a.stack, a.workspace)},
+		core.Field{Name: "plan_text", Value: filepath.Join(a.planDir(), "units", filepath.FromSlash(unit.Path), "plan.txt")})
 	if err := a.outputs(fields...); err != nil {
 		return err
 	}
@@ -389,34 +404,17 @@ func (a *app) plan() (err error) {
 // been filtered, and CI command lines have been stripped from it.
 func (a *app) render() error {
 	a.loadCI()
-	r, text, err := a.readPlanDir()
+	r, texts, err := a.readPlanDir()
 	if err != nil {
 		return err
 	}
-	body, marker, record, err := a.renderPlan(r, text, os.Getenv("TFPR_RUN_ID"), os.Getenv("TFPR_JOB_URL"))
+	links := core.Links{Job: os.Getenv("TFPR_JOB_URL"), Summary: os.Getenv("TFPR_SUMMARY_URL"), PlanText: os.Getenv("TFPR_PLAN_TXT_URL")}
+	body, marker, record, err := a.renderPlan(r, texts, links)
 	if err != nil {
 		return err
 	}
 	_, err = io.WriteString(a.stdout, vcs.Compose(marker, record, body))
 	return err
-}
-
-// renderPlan renders the plan comment's human-readable body and passes it
-// through the filter. The marker and record, tfpr's own control lines, are
-// returned separately and never filtered: a filter that rewrites the stack
-// name must not break the upsert match or the record.
-func (a *app) renderPlan(r core.PlanResult, text []byte, runID, jobURL string) (body redact.Text, marker, record string, err error) {
-	b := envOr("TFPR_COMMENT_BUDGET", "45000")
-	budget, err := strconv.Atoi(b)
-	if err != nil || budget < 0 {
-		return body, "", "", fmt.Errorf("TFPR_COMMENT_BUDGET must be a byte count, got '%s'", b)
-	}
-	raw, err := core.RenderPlan(core.PlanComment{Result: r, PlanText: text, RunID: runID, JobURL: jobURL, Budget: budget})
-	if err != nil {
-		return body, "", "", err
-	}
-	body, err = a.filter.Apply(raw)
-	return body, core.PlanMarker(r.Target.Stack, r.Target.Workspace), core.Record(r), err
 }
 
 // comment posts the plan comment from the plan dir. A failed plan posts a
@@ -429,25 +427,46 @@ func (a *app) comment() error {
 		return err
 	}
 	pr := a.ctx.PR
+	r, texts, err := a.readPlanDir()
+	links := core.Links{PlanText: os.Getenv("TFPR_PLAN_TXT_URL")}
 	if pr == "" {
+		// No comment, but the job summary still gets the full plan.
+		if err == nil {
+			if _, err := a.writeSummary(r, texts, links); err != nil {
+				return fmt.Errorf("%w; nothing was published", err)
+			}
+		}
 		fmt.Fprintln(a.stdout, "Not a pull request build; skipping plan comment.")
 		return nil
 	}
-	r, text, err := a.readPlanDir()
 	missing := errors.Is(err, errNoPlanResult)
 	if missing {
-		r, text, err = a.recordFailure(core.Tool{Runner: "byo"}, a.filter.Mode(), nil, err), nil, nil
+		r, texts, err = a.recordFailure(core.Tool{Runner: "byo"}, a.filter.Mode(), nil, err), nil, nil
 	}
 	if err != nil {
 		return err
 	}
-	body, marker, record, err := a.renderPlan(r, text, a.ctx.RunID, a.ci.JobURL())
+	links.Job = a.ci.JobURL()
+	written, err := a.writeSummary(r, texts, links)
+	if written {
+		links.Summary = a.summaryURL()
+	}
+	if err == nil {
+		var body redact.Text
+		var marker, record string
+		body, marker, record, err = a.renderPlan(r, texts, links)
+		if err == nil {
+			return a.postPlanComment(v, pr, r, marker, record, body, missing)
+		}
+	}
 	if errors.Is(err, redact.ErrFailed) {
 		return fmt.Errorf("%w; nothing was posted", err)
 	}
-	if err != nil {
-		return err
-	}
+	return err
+}
+
+// postPlanComment upserts the rendered plan comment.
+func (a *app) postPlanComment(v vcs.VCS, pr string, r core.PlanResult, marker, record string, body redact.Text, missing bool) error {
 	// Best effort: a comment API failure shouldn't hide the plan's own result.
 	msg, err := v.UpsertComment(pr, marker, record, body)
 	switch {

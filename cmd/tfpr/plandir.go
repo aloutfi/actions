@@ -234,9 +234,9 @@ func (a *app) redactNames(u *core.Unit) error {
 	return nil
 }
 
-// readPlanDir reads the PlanResult and, unless the plan failed, its one
-// unit's plan text.
-func (a *app) readPlanDir() (core.PlanResult, []byte, error) {
+// readPlanDir reads the PlanResult and the plan text of every unit that has
+// one, by unit path. Units that failed, did not run or were excluded have none.
+func (a *app) readPlanDir() (core.PlanResult, map[string]string, error) {
 	dir := a.planDir()
 	path := filepath.Join(dir, "plan-result.json")
 	var r core.PlanResult
@@ -253,14 +253,19 @@ func (a *app) readPlanDir() (core.PlanResult, []byte, error) {
 	if r.Schema != core.PlanResultSchema {
 		return r, nil, fmt.Errorf("%s: schema '%s', want '%s'", path, r.Schema, core.PlanResultSchema)
 	}
-	if r.Summary.Status == core.StatusError {
-		return r, nil, nil
+	texts := map[string]string{}
+	for _, u := range r.Units {
+		switch u.Status {
+		case core.StatusError, core.StatusNotRun, core.StatusExcluded:
+			continue
+		}
+		text, err := os.ReadFile(filepath.Join(dir, "units", filepath.FromSlash(u.Path), "plan.txt"))
+		if err != nil {
+			return r, nil, err
+		}
+		texts[u.Path] = string(text)
 	}
-	if len(r.Units) != 1 {
-		return r, nil, fmt.Errorf("the plan comment layout shows one unit; %s has %d", dir, len(r.Units))
-	}
-	text, err := os.ReadFile(filepath.Join(dir, "units", filepath.FromSlash(r.Units[0].Path), "plan.txt"))
-	return r, text, err
+	return r, texts, nil
 }
 
 // gitTree is the tree id of commit sha in the repository tfpr runs in, or

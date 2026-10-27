@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 )
 
 // fakeGitHub is the GitHub REST API as tfpr uses it. Its fields shape the
@@ -113,6 +116,7 @@ type result struct {
 	tf      string // terraform calls
 	api     string // GitHub API calls
 	body    string // last comment body written
+	summary string // the job summary written
 }
 
 func newScenario(t *testing.T) *scenario {
@@ -137,13 +141,15 @@ func newScenario(t *testing.T) *scenario {
 		"GITHUB_REF": "refs/heads/main", "GITHUB_ACTOR": "me", "RUNNER_NAME": "r",
 		"GITHUB_EVENT_NAME": "push", "GITHUB_EVENT_PATH": event,
 		"GITHUB_API_URL": srv.URL, "TFPR_TF_BIN": stub, "FAKE_LOG": filepath.Join(dir, "log"),
-		"TFPR_STACK": "stack", "TFPR_WORKSPACE": "default",
+		"GITHUB_STEP_SUMMARY": filepath.Join(dir, "summary"),
+		"TFPR_STACK":          "stack", "TFPR_WORKSPACE": "default",
 	}
 	// Anything the host CI sets must not leak in.
 	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN", "TFPR_GITHUB_TOKEN", "TFPR_EXIT_CODE", "TFPR_RUN_ID", "TFPR_JOB_URL",
 		"TFPR_COMMENT_BUDGET", "TFPR_COMMENT_AUTHOR", "TFPR_USE_PLANFILE", "TFPR_ALLOW_FRESH_PLAN_FALLBACK",
 		"TFPR_PLAN_DIR", "TFPR_PLAN_RUN_ID", "TFPR_LOCK_TIMEOUT", "TFPR_PLAN_WORKFLOW", "TFPR_VCS",
-		"TFPR_REPO", "TFPR_OUTPUT_FILE", "TFPR_DIR", "TFPR_FILTER", "TFPR_PLAN_JSON", "TFPR_PLAN_TXT", "TFPR_PLANFILE", "FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY"} {
+		"TFPR_REPO", "TFPR_OUTPUT_FILE", "TFPR_DIR", "TFPR_FILTER", "TFPR_PLAN_JSON", "TFPR_PLAN_TXT", "TFPR_PLANFILE",
+		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED", "FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY"} {
 		env[k] = ""
 	}
 	return &scenario{t: t, ws: ws, gh: gh, env: env}
@@ -176,13 +182,32 @@ func (s *scenario) byo(fixture string) result {
 	dir := filepath.Join(root, "test", "fixtures", "render", fixture)
 	exit, err := os.ReadFile(filepath.Join(dir, "exit_code"))
 	must(s.t, err)
-	s.set("TFPR_PLAN_JSON", filepath.Join(dir, "plan.json"), "TFPR_PLAN_TXT", filepath.Join(dir, "plan.txt"),
+	s.set("TFPR_PLAN_JSON", s.fixtureFile(dir, "plan.json"), "TFPR_PLAN_TXT", s.fixtureFile(dir, "plan.txt"),
 		"TFPR_EXIT_CODE", strings.TrimSpace(string(exit)))
 	r := s.run("derive")
 	if r.rc != 0 {
 		s.t.Fatalf("derive failed:\n%s", r.out)
 	}
 	return r
+}
+
+// fixtureFile is the path of a fixture file; a gzipped one (large
+// fixtures) is unzipped into the workspace first.
+func (s *scenario) fixtureFile(dir, name string) string {
+	path := filepath.Join(dir, name)
+	f, err := os.Open(path + ".gz")
+	if os.IsNotExist(err) {
+		return path
+	}
+	must(s.t, err)
+	defer f.Close()
+	z, err := gzip.NewReader(f)
+	must(s.t, err)
+	data, err := io.ReadAll(z)
+	must(s.t, err)
+	out := filepath.Join(s.ws, "fixture-"+name)
+	must(s.t, os.WriteFile(out, data, 0o644))
+	return out
 }
 
 // planResult reads the plan dir's plan-result.json.
@@ -200,6 +225,7 @@ func (s *scenario) run(cmd string) result {
 	// Each run starts with empty logs; the fake API keeps its call history.
 	must(s.t, os.WriteFile(s.env["GITHUB_OUTPUT"], nil, 0o644))
 	must(s.t, os.WriteFile(s.env["FAKE_LOG"], nil, 0o644))
+	must(s.t, os.WriteFile(s.env["GITHUB_STEP_SUMMARY"], nil, 0o644))
 	var out syncBuffer
 	rc := run([]string{cmd}, &out, &out)
 	read := func(name string) string {
@@ -207,7 +233,7 @@ func (s *scenario) run(cmd string) result {
 		return string(data)
 	}
 	return result{rc: rc, out: out.String(), outputs: read("GITHUB_OUTPUT"), tf: read("FAKE_LOG"),
-		api: strings.Join(s.gh.calls, "\n"), body: s.gh.body}
+		api: strings.Join(s.gh.calls, "\n"), body: s.gh.body, summary: read("GITHUB_STEP_SUMMARY")}
 }
 
 // syncBuffer collects stdout and stderr together. Filters and terraform
@@ -268,10 +294,17 @@ func lacks(t *testing.T, name, haystack, needle string) {
 	}
 }
 
+var update = flag.Bool("update", false, "rewrite the golden files these tests own")
+
 // golden compares got with test/fixtures/<file>, shared with test/run.sh.
+// go test ./cmd/tfpr -update rewrites it.
 func golden(t *testing.T, file, got string) {
 	t.Helper()
-	want, err := os.ReadFile(filepath.Join(root, "test", "fixtures", file))
+	path := filepath.Join(root, "test", "fixtures", file)
+	if *update {
+		must(t, os.WriteFile(path, []byte(got), 0o644))
+	}
+	want, err := os.ReadFile(path)
 	must(t, err)
 	if string(want) != got {
 		t.Errorf("%s differs; got:\n%s", file, got)
@@ -696,7 +729,7 @@ func TestBYOFilter(t *testing.T) {
 	s.set("GITHUB_EVENT_NAME", "pull_request", "TFPR_FILTER", `sed 's/"beta"/"REDACTED"/g'`)
 	r := s.run("comment")
 	eq(t, "comment: exit code", 0, r.rc)
-	has(t, "address in the diff summary", r.body, `- terraform_data.item["REDACTED"] will be destroyed`)
+	has(t, "address in the resource list", r.body, `-   terraform_data.item["REDACTED"]   delete`)
 	lacks(t, "comment body", r.body, `"beta"`)
 }
 
@@ -821,8 +854,8 @@ func TestBYOFailedPlan(t *testing.T) {
 	has(t, "derive: unit exit code", s.planResult(), `"exit_code": 1,`)
 	r = s.set("GITHUB_EVENT_NAME", "pull_request").run("comment")
 	eq(t, "comment: exit code", 0, r.rc)
-	has(t, "comment: failed body", r.body, "Plan failed for <code>stack</code>")
-	has(t, "comment: reason", r.body, "**Reason:** the plan failed (TFPR_EXIT_CODE=1)")
+	has(t, "comment: failed body", r.body, "**Plan failed.** Any earlier plan for `stack` is out of date")
+	has(t, "comment: reason", r.body, "Reason: `the plan failed (TFPR_EXIT_CODE=1)`")
 }
 
 // A mistyped stack stays a clear error on every run: tfpr never creates the
@@ -839,7 +872,7 @@ func TestMissingStackIsNeverCreated(t *testing.T) {
 	// comment still says the plan failed, without writing anything.
 	r := s.set("GITHUB_EVENT_NAME", "pull_request").run("comment")
 	eq(t, "comment: exit code", 1, r.rc)
-	has(t, "comment: failed body", r.body, "Plan failed for <code>typo</code>")
+	has(t, "comment: failed body", r.body, "Any earlier plan for `typo` is out of date")
 	_, err := os.Stat(filepath.Join(s.ws, "typo"))
 	eq(t, "comment: no stack dir", true, os.IsNotExist(err))
 
@@ -858,7 +891,7 @@ func TestCommentWithoutPlanDir(t *testing.T) {
 	r := s.run("comment")
 	eq(t, "exit code", 1, r.rc)
 	has(t, "posts", r.api, "POST /repos/o/r/issues/42/comments")
-	has(t, "failed body", r.body, "Plan failed for <code>stack</code>")
+	has(t, "failed body", r.body, "**Plan failed.** Any earlier plan for `stack` is out of date")
 	has(t, "reason", r.body, "no plan-result.json in stack/.tfpr")
 	has(t, "records it", s.planResult(), `"status": "error"`)
 }
@@ -916,7 +949,7 @@ func TestFilterNeverTouchesMarkerOrRecord(t *testing.T) {
 	lines := strings.SplitN(r.body, "\n", 3)
 	eq(t, "marker unfiltered", "<!-- tf-plan:prod :: default -->", lines[0])
 	has(t, "record unfiltered", lines[1], `"key":"prod:default"`)
-	has(t, "body filtered", lines[2], "<code>X</code>")
+	has(t, "body filtered", lines[2], "`X`")
 	lacks(t, "body filtered", lines[2], "prod")
 }
 
@@ -928,7 +961,7 @@ func TestRenderOutputIsTheBody(t *testing.T) {
 	eq(t, "derive", 0, s.set("TFPR_PLAN_JSON", fixture, "TFPR_PLAN_TXT", "plan.txt").run("derive").rc)
 	r := s.run("render")
 	eq(t, "exit code", 0, r.rc)
-	if !strings.HasPrefix(r.out, "<!-- tf-plan:stack :: default -->\n") || !strings.HasSuffix(r.out, "</details>\n") {
+	if !strings.HasPrefix(r.out, "<!-- tf-plan:stack :: default -->\n") || !strings.HasSuffix(r.out, "redaction: none\n") {
 		t.Errorf("render output is not just the body:\n%s", r.out)
 	}
 	lacks(t, "no markers", r.out, "stop-commands")
@@ -974,4 +1007,117 @@ func TestUsage(t *testing.T) {
 	var out bytes.Buffer
 	eq(t, "exit code", 1, run(nil, &out, &out))
 	has(t, "message", out.String(), "tfpr: usage: tfpr plan|derive|render|comment|decide|apply|resolve-plan-run")
+}
+
+// comment writes the full plan to the job summary first, through the
+// filter, and links it from the comment.
+func TestCommentWritesTheJobSummary(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_FILTER", `sed 's/"beta"/"REDACTED"/g'`,
+		"TFPR_PLAN_TXT_URL", "https://github.example/artifacts/9")
+	s.byo("moves-only")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "summary: full plan, noise kept", r.summary, "# (1 unchanged attribute hidden)")
+	has(t, "summary: expanded", r.summary, "<details open><summary>Plan output for stack</summary>")
+	has(t, "summary: filtered", r.summary, `terraform_data.entry["REDACTED"]`)
+	lacks(t, "summary: filtered", r.summary, `"beta"`)
+	lacks(t, "comment: noise removed", r.body, "unchanged attribute hidden")
+	has(t, "comment: links the summary", r.body, "[full plan](https://github.example/o/r/actions/runs/1)")
+
+	// Off: no summary, no link.
+	s = newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_SUMMARY", "false")
+	s.byo("moves-only")
+	r = s.run("comment")
+	eq(t, "off: summary", "", r.summary)
+	lacks(t, "off: no link", r.body, "[full plan]")
+}
+
+// Outside a pull request there is no comment, but the summary is written,
+// with no API calls.
+func TestSummaryWithoutPR(t *testing.T) {
+	s := newScenario(t)
+	s.byo("changes")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "skips the comment", r.out, "Not a pull request build; skipping plan comment.")
+	has(t, "summary", r.summary, "**Resources (4)**")
+	eq(t, "no API calls", "", r.api)
+}
+
+// TFPR_COMMENT_BUDGET caps the whole comment: marker, record and body.
+func TestCommentBudget(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_COMMENT_BUDGET", "3000")
+	s.byo("truncated")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	if n := utf8.RuneCountInString(r.body); n > 3000 {
+		t.Errorf("comment is %d characters, over 3,000", n)
+	}
+	has(t, "banner", strings.Join(strings.SplitN(r.body, "\n", 6)[:5], "\n"), "> **Plan text truncated**")
+	eq(t, "bad budget", 1, s.set("TFPR_COMMENT_BUDGET", "lots").run("comment").rc)
+}
+
+// A filter that lengthens the body past the budget gets the minimal layout,
+// filtered too.
+func TestFilterThatLengthensFallsBack(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_COMMENT_BUDGET", "6000")
+	s.byo("truncated")
+	r := s.set("TFPR_FILTER", `sed 's/item/itemitemitemitemitemitem/g'`).run("comment")
+	eq(t, "exit code", 0, r.rc)
+	if n := utf8.RuneCountInString(r.body); n > 6000 {
+		t.Errorf("comment is %d characters, over 6,000", n)
+	}
+	has(t, "minimal layout", r.body, "> **Comment shortened**")
+}
+
+// TFPR_TEMPLATE replaces named blocks; the example in the docs overrides
+// only the footer.
+func TestTemplateOverride(t *testing.T) {
+	s := newScenario(t)
+	s.write("footer.tmpl", "{{define \"footer\"}}\nOwners: @infra-team · [Runbook](https://example.invalid/runbook)\n{{end}}\n")
+	s.byo("changes")
+	r := s.set("TFPR_TEMPLATE", "footer.tmpl").run("render")
+	eq(t, "exit code", 0, r.rc)
+	if !strings.HasSuffix(r.out, "</details>\n\nOwners: @infra-team · [Runbook](https://example.invalid/runbook)\n") {
+		t.Errorf("footer not replaced:\n%s", r.out)
+	}
+	has(t, "rest unchanged", r.out, "**Resources (4)**")
+
+	r = s.set("TFPR_TEMPLATE", "missing.tmpl").run("render")
+	eq(t, "missing template: exit code", 1, r.rc)
+	has(t, "missing template: says so", r.out, "TFPR_TEMPLATE: open missing.tmpl")
+}
+
+// TFPR_COMMENT_BUDGET can lower the comment's size, never raise it past the
+// host's limit: GitHub rejects longer comments.
+func TestCommentBudgetIsClampedToTheHost(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_COMMENT_BUDGET", "200000")
+	s.byo("large")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	if n := utf8.RuneCountInString(r.body); n > 65536 {
+		t.Errorf("comment is %d characters, over GitHub's 65,536", n)
+	}
+}
+
+// A budget too small for the marker, the record and a minimal body is a
+// configuration error, said plainly.
+func TestCommentBudgetTooSmall(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_COMMENT_BUDGET", "100")
+	s.byo("changes")
+	r := s.run("comment")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "says why", r.out, "TFPR_COMMENT_BUDGET is 100 characters; this comment needs at least")
+	lacks(t, "posts nothing", r.api, "POST")
+}
+
+// A summary over the CI's limit even in the minimal layout is not
+// uploaded, and so not linked.
+func TestOversizedSummaryIsNotUploaded(t *testing.T) {
+	s := newScenario(t)
+	s.byo("changes")
+	r := s.set("TFPR_FILTER", `cat; head -c 2000000 /dev/zero | tr '\0' x`).run("comment")
+	eq(t, "exit code", 0, r.rc)
+	eq(t, "nothing uploaded", "", r.summary)
+	has(t, "warns", r.out, "::warning::Not writing the job summary")
 }

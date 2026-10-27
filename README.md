@@ -3,8 +3,12 @@
 Terraform plan → PR comment → apply, as one static Go binary (`tfpr`,
 standard library only) with thin GitHub Actions wrappers.
 
-- `plan`: init, validate, and plan. Posts or updates one summary comment per
-  stack and workspace on the PR. Can upload the binary planfile as an artifact.
+- `plan`: init, validate, and plan. Posts or updates one comment per stack
+  and workspace on the PR: a banner up front when the plan is truncated or
+  forgets resources, the counts, a risk-ordered resource list, then the plan
+  text. The full plan goes to the job summary and a `plan.txt` artifact, and
+  the comment links both. Can upload the binary planfile as an artifact. See
+  [docs/plan-comment.md](docs/plan-comment.md).
 - `apply`: applies the reviewed planfile from that artifact, or a fresh plan,
   then posts the result on the PR that produced the commit.
 - `resolve-plan-run`: finds the PR's plan run for a merge commit, so apply can
@@ -226,11 +230,17 @@ merge-time stage reads it back from the bot's own comment.
 | `terraform_version` | `1.15.3` | |
 | `output_planfile` | `false` | Upload `tfplan` + `plan-metadata.json` as `tfplan-<stack-slug>-<workspace>` |
 | `retention_days` | `7` | How long the planfile artifact is kept. Apply fails if it has expired by merge time. |
+| `upload_plan_text` | `true` | Upload the filtered plan text as `<plan_artifact_name>.txt` (not zipped) and link it from the comment |
+| `job_summary` | `true` | Write the full filtered plan to the job summary and link it from the comment |
+| `template` | | Comment template file; its `{{define}}` blocks replace the default's ([docs](docs/plan-comment.md#changing-the-comment-tfpr_template)) |
 | `comment_author` | `github-actions[bot]` | Only comments by this login are updated |
 | `token` | `github.token` | GitHub API token |
 
 Outputs: `exit_code`, `has_changes`, `has_imports`, `has_output_changes`,
-`summary`, `plan_artifact_name`.
+`summary`, `plan_artifact_name`, `plan_text_url`.
+
+The comment step runs on every run that was not cancelled. Outside a pull
+request it writes only the job summary.
 
 ### apply
 
@@ -302,7 +312,8 @@ test/run.sh                  # black-box CLI suite (builds tfpr; or set TFPR_BIN
                              # render fixtures: test/fixtures/render/*/{plan.json,plan.txt}
                              # -> plan-result.json and expected.md goldens
 test/run.sh --update         # rewrite golden files
-test/fixtures/generate.sh    # regenerate plan fixtures with real terraform
+go test ./cmd/tfpr -update   # rewrite the comment goldens the Go tests own
+test/fixtures/generate.sh [case...]  # regenerate plan fixtures with real terraform
 gofmt -l . && go vet ./...
 shellcheck scripts/install-tfpr.sh test/run.sh test/fixtures/generate.sh
 actionlint

@@ -1,7 +1,8 @@
 name: "Terraform Plan"
 description: >-
   Run terraform init, validate and plan; parse the plan; optionally upload the
-  binary planfile as an artifact; and upsert a PR comment with a summary.
+  binary planfile as an artifact; write the full plan to the job summary and
+  upload it as plan.txt; and upsert a PR comment that links both.
   Provider credentials come from job-level `env:`, which composite steps
   inherit. Step-level `env:` on the `uses:` step does not reach them.
 
@@ -28,6 +29,22 @@ inputs:
       expired by the time the PR merges, so keep this longer than PRs stay open.
     required: false
     default: "7"
+  upload_plan_text:
+    description: >-
+      Upload the filtered plan text as an artifact (<plan_artifact_name>.txt,
+      not zipped) and link it from the comment
+    required: false
+    default: "true"
+  job_summary:
+    description: Write the full filtered plan to the job summary and link it from the comment
+    required: false
+    default: "true"
+  template:
+    description: >-
+      Path to a comment template file whose {{define}} blocks replace the
+      default comment's blocks of the same name (TFPR_TEMPLATE)
+    required: false
+    default: ""
   comment_author:
     description: Login that owns the PR comment. Only its comments are updated.
     required: false
@@ -56,6 +73,9 @@ outputs:
   plan_artifact_name:
     description: Artifact name for the planfile (uploaded when output_planfile=true)
     value: ${{ steps.plan.outputs.plan_artifact_name }}
+  plan_text_url:
+    description: Download URL of the plan.txt artifact (upload_plan_text=true)
+    value: ${{ steps.plan-text-upload.outputs.artifact-url }}
 
 runs:
   using: composite
@@ -105,11 +125,37 @@ runs:
         retention-days: ${{ inputs.retention_days }}
         if-no-files-found: error
 
+    # With archive: false the file name is the artifact name, so it carries
+    # the stack and workspace. The text was filtered when tfpr stored it.
+    - name: Stage plan text
+      id: plan-text
+      if: inputs.upload_plan_text == 'true' && steps.plan.outputs.plan_text != ''
+      shell: bash
+      env:
+        SRC: ${{ steps.plan.outputs.plan_text }}
+        NAME: ${{ steps.plan.outputs.plan_artifact_name }}
+      run: |
+        dest="${RUNNER_TEMP}/${NAME}.txt"
+        cp "${SRC}" "${dest}"
+        echo "path=${dest}" >> "${GITHUB_OUTPUT}"
+
+    - name: Upload plan text
+      id: plan-text-upload
+      if: steps.plan-text.outputs.path != ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        path: ${{ steps.plan-text.outputs.path }}
+        archive: false
+        overwrite: true
+        retention-days: ${{ inputs.retention_days }}
+        if-no-files-found: error
+
     # Runs even when the plan failed: tfpr plan records the failure, and the
     # comment replaces the last good plan with "plan failed". Not on a
     # cancelled run, which may have been superseded by a newer, good plan.
-    - name: Upsert PR comment
-      if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    # Outside a pull request it writes only the job summary.
+    - name: Job summary and PR comment
+      if: ${{ !cancelled() }}
       shell: bash
       env:
         TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
@@ -117,4 +163,7 @@ runs:
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
         TFPR_GITHUB_TOKEN: ${{ inputs.token }}
+        TFPR_PLAN_TXT_URL: ${{ steps.plan-text-upload.outputs.artifact-url }}
+        TFPR_SUMMARY: ${{ inputs.job_summary }}
+        TFPR_TEMPLATE: ${{ inputs.template }}
       run: '"${TFPR}" comment'

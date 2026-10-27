@@ -1,0 +1,35 @@
+### 🔀 Terraform plan · `forget` (`default`) · No infrastructure changes; state-only: 1 forgotten
+> **1 resource will be forgotten**: removed from state, not destroyed; it keeps running, unmanaged.
+> Redaction: no redaction filter configured
+
+| Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 |
+
+**Resources (1)**
+```diff
+~   terraform_data.pinned  forget
+```
+
+<details open><summary>Plan output for forget</summary>
+
+```terraform
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+
+Terraform will perform the following actions:
+
+ # terraform_data.pinned will no longer be managed by Terraform, but will not be destroyed
+ # (destroy = false is set in the configuration)
+ . resource "terraform_data" "pinned" {
+        id               = "6f6d936c-ec4e-10a5-6bc0-76a01ef26d92"
+        # (1 unchanged attribute hidden)
+    }
+
+Plan: 0 to add, 0 to change, 0 to destroy.
+```
+
+</details>
+
+tfpr dev · redaction: none
