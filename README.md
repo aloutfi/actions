@@ -100,8 +100,11 @@ and the record. They carry only the stack, the workspace, the commit and tree
 ids, unit paths, statuses and hashes. Plan text can't forge them: lines that
 look like a marker or record are removed from the body.
 
-It fails closed. A non-zero exit, a two-minute timeout, or empty output for
-non-empty input fails the command, and nothing is posted. Filters must be
+It fails closed. A non-zero exit, empty output for non-empty input, or a
+filter that hasn't finished two minutes after its input ended fails the
+command, and nothing is posted. For terraform output, which streams through
+the filter for as long as terraform runs, the two minutes start when
+terraform exits. Filters must be
 idempotent, because the plan text is filtered once when it is stored and
 again inside the comment body. They must also keep one output line per input
 line, because names are filtered one per line. The filter does not see tfpr's

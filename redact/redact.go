@@ -47,8 +47,15 @@ const (
 // ErrFailed wraps every filter failure.
 var ErrFailed = errors.New("redaction filter failed")
 
-// timeout bounds one Apply; tests shorten it.
+// timeout bounds how long the filter may take to finish once its input has
+// ended: the whole of one Apply, or the tail of a stream after the producer
+// (say, a terraform apply that ran for hours) closed it. Tests shorten it.
 var timeout = 2 * time.Minute
+
+// waitDelay bounds the wait for the filter's output pipes after it exits or
+// is killed, in case it left a child process holding them open. Tests
+// shorten it.
+var waitDelay = 5 * time.Second
 
 // Filter is the configured redaction filter.
 type Filter struct {
@@ -154,9 +161,11 @@ func LogIssue(line string) (level, msg string, ok bool) {
 }
 
 // Writer returns a writer that passes everything written to it through the
-// filter into w. Close flushes it and reports a filter failure. With no
-// filter configured it writes straight to w. Writes never fail, so a
-// producer streaming into it is never blocked; failures surface on Close.
+// filter into w. Close ends the input, gives the filter up to the timeout to
+// finish (no limit applies while input is still flowing), and reports a
+// filter failure. With no filter configured it writes straight to w. Writes
+// never fail, so a producer streaming into it is never blocked; failures
+// surface on Close.
 func (f Filter) Writer(w io.Writer) io.WriteCloser {
 	if f.command == "" {
 		return nopCloser{w}
@@ -173,6 +182,7 @@ func (f Filter) Writer(w io.Writer) io.WriteCloser {
 
 func (f Filter) cmd(ctx context.Context) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "sh", "-c", f.command)
+	cmd.WaitDelay = waitDelay
 	cmd.Stderr = f.diag
 	cmd.Env = WithoutTFPR(os.Environ())
 	return cmd
@@ -211,7 +221,17 @@ func (s *stream) Close() error {
 		s.in.Close()
 	}
 	if s.cmd.Process != nil {
-		if err := s.cmd.Wait(); err != nil && s.err == nil {
+		done := make(chan error, 1)
+		go func() { done <- s.cmd.Wait() }()
+		var err error
+		select {
+		case err = <-done:
+		case <-time.After(timeout):
+			_ = s.cmd.Process.Kill()
+			<-done
+			err = fmt.Errorf("did not finish within %s after its input ended", timeout)
+		}
+		if err != nil && s.err == nil {
 			s.err = err
 		}
 	}

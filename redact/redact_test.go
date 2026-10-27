@@ -177,3 +177,30 @@ func TestFilterEnvHasNoTFPRVariables(t *testing.T) {
 		t.Errorf("filter saw tfpr's variables: %v\n%s", err, got)
 	}
 }
+
+// A stream may run for hours; the timeout only bounds how long the filter
+// takes to finish after the input ends.
+func TestWriterTimeoutStartsWhenInputEnds(t *testing.T) {
+	defer func(d, w time.Duration) { timeout, waitDelay = d, w }(timeout, waitDelay)
+	timeout, waitDelay = 300*time.Millisecond, 300*time.Millisecond
+
+	var b bytes.Buffer
+	w := filter(t, "cat").Writer(&b)
+	io.WriteString(w, "early\n")
+	time.Sleep(2 * timeout) // a long-running producer
+	io.WriteString(w, "late\n")
+	if err := w.Close(); err != nil || b.String() != "early\nlate\n" {
+		t.Errorf("long stream: %q, %v", b.String(), err)
+	}
+
+	w = filter(t, "cat; sleep 10").Writer(io.Discard)
+	io.WriteString(w, "x\n")
+	start := time.Now()
+	err := w.Close()
+	if !errors.Is(err, ErrFailed) || !strings.Contains(err.Error(), "did not finish") {
+		t.Errorf("hung filter: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > timeout+waitDelay+time.Second {
+		t.Errorf("Close took %s", elapsed)
+	}
+}
