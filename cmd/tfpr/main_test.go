@@ -960,6 +960,16 @@ func TestDeriveRequiresValidExitCode(t *testing.T) {
 	has(t, "recorded", s.planResult(), `"status": "error"`)
 }
 
+func TestFileSHA256(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tfplan")
+	must(t, os.WriteFile(path, []byte("abc"), 0o644))
+	got, err := fileSHA256(path)
+	eq(t, "sha256", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", got)
+	must(t, err)
+	_, err = fileSHA256(filepath.Join(t.TempDir(), "missing"))
+	eq(t, "missing file", true, err != nil)
+}
+
 func TestUsage(t *testing.T) {
 	var out bytes.Buffer
 	eq(t, "exit code", 1, run(nil, &out, &out))
