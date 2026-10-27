@@ -436,8 +436,7 @@ func (a *app) comment() error {
 	r, text, err := a.readPlanDir()
 	missing := errors.Is(err, errNoPlanResult)
 	if missing {
-		a.recordFailure(core.Tool{Runner: "byo"}, a.filter.Mode(), nil, err)
-		r, text, err = a.readPlanDir()
+		r, text, err = a.recordFailure(core.Tool{Runner: "byo"}, a.filter.Mode(), nil, err), nil, nil
 	}
 	if err != nil {
 		return err

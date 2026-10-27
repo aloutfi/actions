@@ -124,16 +124,32 @@ func (a *app) deriveUnit(in core.UnitInput, text redact.Text) (core.Unit, string
 }
 
 // recordFailure writes a PlanResult whose one unit failed for cause, so a
-// later comment replaces the last good plan. It only warns if that fails:
-// cause is the error that matters.
-func (a *app) recordFailure(tool core.Tool, mode string, exit *int, cause error) {
+// later comment replaces the last good plan, and returns it. It only warns
+// if the write fails: cause is the error that matters.
+func (a *app) recordFailure(tool core.Tool, mode string, exit *int, cause error) core.PlanResult {
 	var tf tfFailed
 	if errors.As(cause, &tf) && tf.cmd == "plan" {
 		exit = &tf.code
 	}
-	if _, err := a.writePlanDir(core.FailedUnit(".", exit, cause.Error()), nil, tool, mode); err != nil {
+	r, err := a.writePlanDir(core.FailedUnit(".", exit, cause.Error()), nil, tool, mode)
+	if err != nil {
 		a.ci.Log(ci.Warning, "Could not record the failed plan in "+a.planDir()+": "+err.Error())
 	}
+	return r
+}
+
+// checkPlanDir refuses to write a plan dir that would create the stack
+// directory: a mistyped stack must stay a clear error on every run, not
+// become an empty directory.
+func (a *app) checkPlanDir() error {
+	if _, err := os.Stat(a.stack); err == nil {
+		return nil
+	}
+	rel, err := filepath.Rel(a.stack, a.planDir())
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("stack directory '%s' does not exist, so no plan dir was written inside it", a.stack)
+	}
+	return nil
 }
 
 // writePlanDir writes the plan dir for one unit. text is the unit's filtered
@@ -153,6 +169,9 @@ func (a *app) writePlanDir(unit core.Unit, text *redact.Text, tool core.Tool, mo
 	}, []core.Unit{unit})
 
 	dir := a.planDir()
+	if err := a.checkPlanDir(); err != nil {
+		return r, err
+	}
 	if err := os.RemoveAll(filepath.Join(dir, "units")); err != nil {
 		return r, err
 	}

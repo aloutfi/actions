@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -822,6 +823,32 @@ func TestBYOFailedPlan(t *testing.T) {
 	eq(t, "comment: exit code", 0, r.rc)
 	has(t, "comment: failed body", r.body, "Plan failed for <code>stack</code>")
 	has(t, "comment: reason", r.body, "**Reason:** the plan failed (TFPR_EXIT_CODE=1)")
+}
+
+// A mistyped stack stays a clear error on every run: tfpr never creates the
+// stack directory, even to record the failure.
+func TestMissingStackIsNeverCreated(t *testing.T) {
+	s := newScenario(t).set("TFPR_STACK", "typo")
+	for run := 1; run <= 2; run++ {
+		r := s.run("plan")
+		eq(t, fmt.Sprintf("run %d: exit code", run), 1, r.rc)
+		has(t, fmt.Sprintf("run %d: error", run), r.out, "::error::stack directory 'typo' not found")
+		_, err := os.Stat(filepath.Join(s.ws, "typo"))
+		eq(t, fmt.Sprintf("run %d: no stack dir", run), true, os.IsNotExist(err))
+	}
+	// comment still says the plan failed, without writing anything.
+	r := s.set("GITHUB_EVENT_NAME", "pull_request").run("comment")
+	eq(t, "comment: exit code", 1, r.rc)
+	has(t, "comment: failed body", r.body, "Plan failed for <code>typo</code>")
+	_, err := os.Stat(filepath.Join(s.ws, "typo"))
+	eq(t, "comment: no stack dir", true, os.IsNotExist(err))
+
+	// An explicit TFPR_DIR outside the stack still records the failure.
+	s = newScenario(t).set("TFPR_STACK", "typo", "TFPR_DIR", "out")
+	eq(t, "TFPR_DIR: exit code", 1, s.run("plan").rc)
+	data, err := os.ReadFile(filepath.Join(s.ws, "out", "plan-result.json"))
+	must(t, err)
+	has(t, "TFPR_DIR: recorded", string(data), "stack directory 'typo' not found")
 }
 
 // With no plan dir at all, comment records and posts the failure itself and
