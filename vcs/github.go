@@ -12,12 +12,13 @@ import (
 // DefaultGitHubAuthor is the login of the default GITHUB_TOKEN identity.
 const DefaultGitHubAuthor = "github-actions[bot]"
 
-// NewGitHubClient is a REST client for the GitHub API at apiURL
-// (https://api.github.com when empty), authenticated with token if set.
+// GitHubAPI is the public GitHub API.
+const GitHubAPI = "https://api.github.com"
+
+// NewGitHubClient is a REST client for the GitHub API at apiURL,
+// authenticated with token if set. There is no default URL: the caller
+// decides, so an enterprise token is never sent to the public API.
 func NewGitHubClient(apiURL, token string) *Client {
-	if apiURL == "" {
-		apiURL = "https://api.github.com"
-	}
 	h := map[string]string{
 		"Accept":               "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",

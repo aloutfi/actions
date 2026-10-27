@@ -61,9 +61,10 @@
 //	                                thread until the plan changes (false)
 //	TFPR_OUTPUT_FILE                step-output file outside a supported CI (stdout)
 //
-// The GitHub adapters authenticate with TFPR_GITHUB_TOKEN (outside the
-// actions: GH_TOKEN or GITHUB_TOKEN) against GITHUB_API_URL
-// (https://api.github.com). Azure Repos uses TFPR_ADO_TOKEN (map
+// The GitHub adapters share one client: TFPR_GITHUB_TOKEN (outside the
+// actions: GH_TOKEN or GITHUB_TOKEN) against TFPR_GITHUB_API_URL, else the
+// CI's GitHub API (GITHUB_API_URL on GitHub Actions), else
+// https://api.github.com. Azure Repos uses TFPR_ADO_TOKEN (map
 // $(System.AccessToken) to it) against the build's collection. terraform never sees any TFPR_* variable, so the
 // token the actions pass stays out of it; a GITHUB_TOKEN the caller sets for
 // the GitHub provider still reaches it.
@@ -136,7 +137,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		stderr:    stderr,
 		stack:     core.CleanStack(envOr("TFPR_STACK", "terraform/")),
 		workspace: envOr("TFPR_WORKSPACE", "default"),
-		api:       vcs.NewGitHubClient(os.Getenv("GITHUB_API_URL"), githubToken()),
 	}
 	a.filter = redact.Configured(stderr, a.logIssue)
 	a.tfBin, a.tfErr = resolveExecutable(envOr("TFPR_TF_BIN", "terraform"))
@@ -177,9 +177,26 @@ func (a *app) exit(err error) int {
 	return 1
 }
 
+// loadCI detects the CI and builds the one GitHub REST client that both the
+// CI adapter (job links) and the repo-host adapter use. Its base URL is
+// settled once the CI says where GitHub is.
 func (a *app) loadCI() {
+	a.api = &vcs.Client{}
 	a.ci = ci.Detect(os.Getenv, a.stdout, a.stderr, a.api)
 	a.ctx = a.ci.Context()
+	*a.api = *vcs.NewGitHubClient(githubAPIURL(a.ctx), githubToken())
+}
+
+// githubAPIURL is the GitHub API to use: TFPR_GITHUB_API_URL, else what the
+// CI says (GITHUB_API_URL on GitHub Actions), else the public API.
+func githubAPIURL(ctx ci.Ctx) string {
+	if u := os.Getenv("TFPR_GITHUB_API_URL"); u != "" {
+		return u
+	}
+	if ctx.VCS == "github" && ctx.VCSURL != "" {
+		return ctx.VCSURL
+	}
+	return vcs.GitHubAPI
 }
 
 // loadVCS picks the repo host: TFPR_VCS, else the one the CI says the repo
@@ -195,7 +212,7 @@ func (a *app) loadVCS() (vcs.VCS, error) {
 	if cfg.Name == "azure" {
 		cfg.URL, cfg.Token = a.ctx.VCSURL, os.Getenv("TFPR_ADO_TOKEN")
 	} else {
-		cfg.URL, cfg.Token = os.Getenv("GITHUB_API_URL"), githubToken()
+		cfg.GitHub = a.api
 	}
 	return vcs.New(cfg)
 }

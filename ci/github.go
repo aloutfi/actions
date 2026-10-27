@@ -52,6 +52,7 @@ func (g *GitHub) Context() Ctx {
 		PR:      g.pr(),
 		Repo:    e("GITHUB_REPOSITORY"),
 		VCS:     "github",
+		VCSURL:  e("GITHUB_API_URL"),
 		Actor:   e("GITHUB_ACTOR"),
 		Attempt: attempt,
 	}

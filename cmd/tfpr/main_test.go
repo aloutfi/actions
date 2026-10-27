@@ -149,8 +149,9 @@ func newScenario(t *testing.T) *scenario {
 		"TFPR_COMMENT_BUDGET", "TFPR_COMMENT_AUTHOR", "TFPR_USE_PLANFILE", "TFPR_ALLOW_FRESH_PLAN_FALLBACK",
 		"TFPR_PLAN_DIR", "TFPR_PLAN_RUN_ID", "TFPR_LOCK_TIMEOUT", "TFPR_PLAN_WORKFLOW", "TFPR_VCS",
 		"TFPR_REPO", "TFPR_OUTPUT_FILE", "TFPR_DIR", "TFPR_FILTER", "TFPR_PLAN_JSON", "TFPR_PLAN_TXT", "TFPR_PLANFILE",
-		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED", "FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY",
-		"TFPR_ADO_TOKEN", "TFPR_ACK", "TF_BUILD", "BUILD_REPOSITORY_PROVIDER", "SYSTEM_COLLECTIONURI",
+		"TFPR_TEMPLATE", "TFPR_SUMMARY", "TFPR_SUMMARY_URL", "TFPR_SUMMARY_FILE", "TFPR_PLAN_TXT_URL", "TFPR_KEEP_UNCHANGED",
+		"FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY", "TFPR_ADO_TOKEN", "TFPR_ACK", "TF_BUILD",
+		"BUILD_REPOSITORY_PROVIDER", "SYSTEM_COLLECTIONURI", "TFPR_GITHUB_API_URL",
 		"SYSTEM_PULLREQUEST_PULLREQUESTID", "SYSTEM_PULLREQUEST_PULLREQUESTNUMBER", "SYSTEM_PULLREQUEST_SOURCECOMMITID"} {
 		env[k] = ""
 	}
@@ -1019,8 +1020,9 @@ func (s *scenario) azure(provider string) *scenario {
 // The Bridge payoff: Azure Pipelines building a GitHub repo comments through
 // the GitHub adapter, with no code written for the combination.
 func TestAzurePipelinesWithGitHubRepo(t *testing.T) {
-	s := newScenario(t).azure("GitHub").set("SYSTEM_COLLECTIONURI", "https://dev.azure.example/org/",
-		"TFPR_GITHUB_TOKEN", "gh-token")
+	s := newScenario(t)
+	s.azure("GitHub").set("SYSTEM_COLLECTIONURI", "https://dev.azure.example/org/",
+		"TFPR_GITHUB_TOKEN", "gh-token", "TFPR_GITHUB_API_URL", s.env["GITHUB_API_URL"])
 	s.byo("changes")
 	r := s.run("comment")
 	eq(t, "exit code", 0, r.rc)
@@ -1090,6 +1092,19 @@ func TestAzureTokenNeverReachesTerraform(t *testing.T) {
 	env, err := os.ReadFile(s.env["FAKE_LOG"] + ".env")
 	must(t, err)
 	lacks(t, "terraform env", string(env), "ado-token")
+}
+
+// One GitHub client serves both the CI adapter (the job link) and the repo
+// host (the comment), so a base-URL override reaches both.
+func TestOneGitHubClient(t *testing.T) {
+	s := newScenario(t)
+	fake := s.env["GITHUB_API_URL"]
+	s.set("GITHUB_EVENT_NAME", "pull_request", "GITHUB_API_URL", "http://127.0.0.1:9", "TFPR_GITHUB_API_URL", fake)
+	s.byo("no-changes")
+	r := s.run("comment")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "job link lookup", r.api, "GET /repos/o/r/actions/runs/1/jobs")
+	has(t, "comment", r.api, "POST /repos/o/r/issues/42/comments")
 }
 
 func TestUsage(t *testing.T) {

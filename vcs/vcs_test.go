@@ -210,7 +210,7 @@ func TestNew(t *testing.T) {
 		{"none", "o/r", "vcs.NoPR"},
 		{"gitlab", "o/r", "error"},
 	} {
-		v, err := New(Config{Name: c.name, Repo: c.repo})
+		v, err := New(Config{Name: c.name, Repo: c.repo, GitHub: NewGitHubClient(GitHubAPI, "")})
 		got := fmt.Sprintf("%T", v)
 		if err != nil {
 			got = "error"

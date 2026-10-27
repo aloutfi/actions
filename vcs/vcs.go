@@ -48,12 +48,13 @@ type VCS interface {
 
 // Config selects and configures a repo-host adapter.
 type Config struct {
-	Name   string // adapter name: github, azure, none; "" picks github, or none without a repo
-	Repo   string // host-specific repo id: owner/repo on GitHub, <project>/<repository> on Azure Repos
-	URL    string // API base URL: GitHub's API ("" for api.github.com), or the Azure DevOps collection
-	Token  string
-	Author string // GitHub: the login that owns tfpr's comments; "" is the default
-	Ack    bool   // Azure Repos: plan threads wait for a reviewer (see Azure)
+	Name   string  // adapter name: github, azure, none; "" picks github, or none without a repo
+	Repo   string  // host-specific repo id: owner/repo on GitHub, <project>/<repository> on Azure Repos
+	GitHub *Client // github: the one GitHub REST client, shared with the CI adapter
+	URL    string  // azure: the Azure DevOps collection
+	Token  string  // azure: the access token
+	Author string  // GitHub: the login that owns tfpr's comments; "" is the default
+	Ack    bool    // Azure Repos: plan threads wait for a reviewer (see Azure)
 }
 
 // New returns the adapter named by cfg.Name.
@@ -67,7 +68,10 @@ func New(cfg Config) (VCS, error) {
 	}
 	switch name {
 	case "github":
-		return NewGitHub(NewGitHubClient(cfg.URL, cfg.Token), cfg.Repo, cfg.Author), nil
+		if cfg.GitHub == nil {
+			return nil, fmt.Errorf("no GitHub client")
+		}
+		return NewGitHub(cfg.GitHub, cfg.Repo, cfg.Author), nil
 	case "azure":
 		if cfg.URL == "" || !strings.Contains(cfg.Repo, "/") {
 			return nil, fmt.Errorf("Azure Repos needs the collection URL and <project>/<repository> (got '%s', '%s')", cfg.URL, cfg.Repo)
