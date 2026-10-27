@@ -27,6 +27,7 @@ import (
 type fakeGitHub struct {
 	t          *testing.T
 	pr         string // PR number associated with every commit; "" for none
+	pulls      string // raw JSON for the commit's PRs, overriding pr
 	branchHead string
 	headRun    string // html_url of the Actions run for the branch head, if any
 	failWrites bool
@@ -72,6 +73,8 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		io.WriteString(w, f.comments)
+	case strings.HasSuffix(p, "/pulls") && f.pulls != "":
+		io.WriteString(w, f.pulls)
 	case strings.HasSuffix(p, "/pulls"):
 		if f.pr == "" {
 			io.WriteString(w, `[]`)

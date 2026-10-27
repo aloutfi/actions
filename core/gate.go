@@ -72,20 +72,21 @@ const DecisionSchema = "tfpr/decision@1"
 // GateResult is the gate's reified decision, decision.json in the plan dir.
 // apply and report act on it and never decide again.
 type GateResult struct {
-	Schema     string `json:"schema"`
-	Action     string `json:"action"` // apply | skip | refuse
-	Reason     string `json:"reason"`
-	Stack      string `json:"stack"`
-	Workspace  string `json:"workspace"`
-	SHA        string `json:"sha"` // the commit decided on
-	Ref        string `json:"ref"`
-	BranchHead string `json:"branch_head,omitempty"` // the branch's head, when it was read
-	Attempt    int    `json:"attempt"`
-	PR         string `json:"pr,omitempty"`          // the PR that merged SHA, when exactly one did
-	PlanRun    string `json:"plan_run,omitempty"`    // the run that planned it, from the PR's trusted record
-	PRHead     string `json:"pr_head,omitempty"`     // the PR head that run planned (= the PR's final head)
-	PlannedSHA string `json:"planned_sha,omitempty"` // the commit that run planned (the PR's merge commit)
-	Artifact   string `json:"artifact"`              // the planfile artifact name
+	Schema     string   `json:"schema"`
+	Action     string   `json:"action"` // apply | skip | refuse
+	Reason     string   `json:"reason"`
+	Stack      string   `json:"stack"`
+	Workspace  string   `json:"workspace"`
+	SHA        string   `json:"sha"` // the commit decided on
+	Ref        string   `json:"ref"`
+	BranchHead string   `json:"branch_head,omitempty"` // the branch's head, when it was read
+	Attempt    int      `json:"attempt"`
+	PRs        []string `json:"prs"`                   // every PR that matched SHA; the result is posted only when there is exactly one
+	PR         string   `json:"pr,omitempty"`          // the PR that merged SHA, when exactly one did
+	PlanRun    string   `json:"plan_run,omitempty"`    // the run that planned it, from the PR's trusted record
+	PRHead     string   `json:"pr_head,omitempty"`     // the PR head that run planned (= the PR's final head)
+	PlannedSHA string   `json:"planned_sha,omitempty"` // the commit that run planned (the PR's merge commit)
+	Artifact   string   `json:"artifact"`              // the planfile artifact name
 }
 
 // For reports whether g decided about this commit, stack and workspace.

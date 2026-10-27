@@ -281,3 +281,22 @@ func TestAzureReportAfterLoginFailure(t *testing.T) {
 	has(t, "links the run", content, "_build/results?buildId=812&view=logs&j=job1")
 	eq(t, "thread stays active", any("active"), ado.created["status"])
 }
+
+// report posts where the gate found exactly one PR, and asks the repo host
+// only once. With several PRs it posts nowhere and says which matched.
+func TestReportUsesTheGatesPR(t *testing.T) {
+	s := newScenario(t).set("TFPR_APPLY_EXIT_CODE", "0")
+	s.gh.pulls = `[{"number":42,"head":{"sha":"a"}},{"number":43,"head":{"sha":"b"}}]`
+	s.run("gate")
+	r := s.run("report")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "says which matched", r.out, "::warning::Several PRs match abc (#42, #43); not posting the apply result")
+	lacks(t, "posts nothing", r.api, "POST")
+	eq(t, "one lookup", 1, strings.Count(r.api, "/commits/abc/pulls"))
+
+	s = newScenario(t).set("TFPR_APPLY_EXIT_CODE", "0")
+	s.run("gate")
+	r = s.run("report")
+	has(t, "one PR: posts", r.api, "POST /repos/o/r/issues/42/comments")
+	eq(t, "one PR: one lookup", 1, strings.Count(r.api, "/commits/abc/pulls"))
+}

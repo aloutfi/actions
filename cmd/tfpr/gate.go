@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/aloutfi/actions/ci"
@@ -80,16 +81,20 @@ func (a *app) runGate(v vcs.VCS) core.GateResult {
 		Guard: guard, Key: core.Key(a.stack, a.workspace), Attempt: c.Attempt,
 		SkipNoop: os.Getenv("TFPR_SKIP_NOOP") == "true",
 	}
+	// The PR that merged the commit: where the result is posted (also for a
+	// skip or refusal), and, with its record, which run planned it (for
+	// the planfile download). A failed lookup is a doubt: it applies.
+	prs := a.mergedPRs(v)
+	g.PRs, in.PRs = make([]string, len(prs)), len(prs)
+	for i, p := range prs {
+		g.PRs[i] = strconv.Itoa(p.Number)
+	}
+	if len(prs) == 1 {
+		g.PR = g.PRs[0]
+	}
 	if guard.Code == core.GuardOK {
-		// The PR and its record also say which run planned it (for the
-		// planfile download). Failures here are doubts: they apply.
-		prs, err := v.PRsForCommit(c.SHA, c.Ref)
-		if err != nil {
-			a.ci.Log(ci.Warning, fmt.Sprintf("Could not look up the PR that merged %s: %s", c.SHA, err))
-		}
-		in.PRs = len(prs)
 		if len(prs) == 1 {
-			g.PR, in.PRHead = strconv.Itoa(prs[0].Number), prs[0].HeadSHA
+			in.PRHead = prs[0].HeadSHA
 			recs, err := v.Records(g.PR, core.PlanMarker(a.stack, a.workspace))
 			if err != nil {
 				a.ci.Log(ci.Warning, fmt.Sprintf("Could not read the plan record on PR #%s: %s", g.PR, err))
@@ -114,6 +119,16 @@ func (a *app) runGate(v vcs.VCS) core.GateResult {
 		a.ci.Log(ci.Notice, fmt.Sprintf("Applying '%s': it can't be skipped as a no-op (%s).", a.stack, d.Reason))
 	}
 	return g
+}
+
+// mergedPRs are the PRs the repo host says merged this commit; none if it
+// can't say.
+func (a *app) mergedPRs(v vcs.VCS) []vcs.PR {
+	prs, err := v.PRsForCommit(a.ctx.SHA, a.ctx.Ref)
+	if err != nil {
+		a.ci.Log(ci.Warning, fmt.Sprintf("Could not look up the PR that merged %s: %s", a.ctx.SHA, err))
+	}
+	return prs
 }
 
 // decisionPath is decision.json in the plan dir.
@@ -158,6 +173,12 @@ func (a *app) report() error {
 	g, ok := a.readDecision()
 	if !ok { // no gate ran: the caller decided to apply on its own
 		g = core.GateResult{Action: core.GateApply, SHA: a.ctx.SHA, Ref: a.ctx.Ref}
+		for _, p := range a.mergedPRs(v) {
+			g.PRs = append(g.PRs, strconv.Itoa(p.Number))
+		}
+		if len(g.PRs) == 1 {
+			g.PR = g.PRs[0]
+		}
 	}
 	r := core.ApplyReport{Gate: g}
 	var incomplete error
@@ -197,19 +218,21 @@ func (a *app) report() error {
 }
 
 // publishApply upserts the apply-result comment on the PR that merged this
-// commit, if there is one.
+// commit, as the gate found it: only when exactly one PR matched.
 func (a *app) publishApply(v vcs.VCS, r core.ApplyReport) error {
 	sha := a.ctx.SHA
-	pr := r.Gate.PR
-	if pr == "" {
+	switch len(r.Gate.PRs) {
+	case 0:
 		// Not every apply comes from a PR merge (drift, manual dispatch).
-		prs, err := v.PRsForCommit(sha, a.ctx.Ref)
-		if err != nil || len(prs) == 0 {
-			fmt.Fprintf(a.stdout, "No PR associated with %s; skipping apply-result comment.\n", sha)
-			return nil
-		}
-		pr = strconv.Itoa(prs[0].Number)
+		fmt.Fprintf(a.stdout, "No PR associated with %s; skipping apply-result comment.\n", sha)
+		return nil
+	case 1:
+	default:
+		a.ci.Log(ci.Warning, fmt.Sprintf("Several PRs match %s (#%s); not posting the apply result, to avoid the wrong PR.",
+			sha, strings.Join(r.Gate.PRs, ", #")))
+		return nil
 	}
+	pr := r.Gate.PRs[0]
 	if r.Gate.Reason == "superseded" {
 		r.SupersededBy = a.ci.RunFor(r.Gate.BranchHead)
 	}
