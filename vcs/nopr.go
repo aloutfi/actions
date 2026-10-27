@@ -1,6 +1,10 @@
 package vcs
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/aloutfi/actions/redact"
+)
 
 // NoPR is the Null repo host, used when there is no repository to talk to
 // (for example a local run). It never touches the network. BranchHead fails,
@@ -8,7 +12,7 @@ import "errors"
 type NoPR struct{}
 
 // UpsertComment skips the comment.
-func (NoPR) UpsertComment(pr, _, _ string) (string, error) {
+func (NoPR) UpsertComment(pr, _ string, _ redact.Text) (string, error) {
 	return "No repository host configured; skipping the comment on PR #" + pr + ".", nil
 }
 

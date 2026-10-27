@@ -2,10 +2,14 @@
 //
 // Usage: tfpr <command>
 //
-//	plan              init, workspace select, validate, plan; parse counts;
-//	                  write plan.json, plan.txt, plan-metadata.json
-//	render            print the plan comment body to stdout (no CI/VCS calls)
-//	comment           render the plan comment and upsert it on the current PR
+//	plan              init, workspace select, validate, plan; write the plan dir
+//	                  (plan-result.json, filtered plan text), plus plan.json,
+//	                  tfplan and plan-metadata.json in the stack
+//	derive            write the plan dir from a plan the caller produced
+//	                  (TFPR_PLAN_JSON, TFPR_PLAN_TXT): "bring your own plan"
+//	render            print the plan comment body from the plan dir (no CI/VCS calls)
+//	comment           render the plan comment from the plan dir and upsert it on
+//	                  the current PR; a failed or missing plan posts "plan failed"
 //	decide            emit whether apply should fetch the planfile artifact
 //	apply             plan-source decision, superseded-tree guard, apply,
 //	                  apply-result comment on the commit's PR
@@ -17,7 +21,15 @@
 //	                                cleaned once, so infra/, ./infra and infra are one stack
 //	TFPR_WORKSPACE                  terraform workspace (default)
 //	TFPR_TF_BIN                     terraform executable (terraform)
-//	TFPR_EXIT_CODE                  render/comment: the plan's -detailed-exitcode
+//	TFPR_DIR                        plan dir shared by plan/derive and render/comment
+//	                                (<stack>/.tfpr)
+//	TFPR_FILTER                     redaction filter, run with sh -c: stdin -> stdout.
+//	                                Every terraform output tfpr echoes, the stored plan
+//	                                text, names from plan.json, and every comment body
+//	                                pass through it; a failure sends nothing
+//	TFPR_PLAN_JSON, TFPR_PLAN_TXT   derive: terraform show -json / -no-color output
+//	TFPR_EXIT_CODE                  derive: the plan's -detailed-exitcode (optional)
+//	TFPR_PLANFILE                   derive: the binary planfile, hashed (optional)
 //	TFPR_RUN_ID, TFPR_JOB_URL       render: run link (comment fills these in)
 //	TFPR_COMMENT_BUDGET             render: max plan.txt bytes in the comment (45000)
 //	TFPR_COMMENT_AUTHOR             comment/apply: login allowed to own the comment
@@ -54,8 +66,12 @@ import (
 
 	"github.com/aloutfi/actions/ci"
 	"github.com/aloutfi/actions/core"
+	"github.com/aloutfi/actions/redact"
 	"github.com/aloutfi/actions/vcs"
 )
+
+// version is set at release build time (-X main.version=...).
+var version = "dev"
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -65,10 +81,30 @@ type exitCode int
 
 func (e exitCode) Error() string { return "exit status " + strconv.Itoa(int(e)) }
 
+// tfFailed is a terraform command that exited non-zero. tfpr exits with the
+// same status, and its message is the reason a failed plan records.
+type tfFailed struct {
+	cmd  string
+	code int
+}
+
+func (e tfFailed) Error() string { return fmt.Sprintf("terraform %s exited %d", e.cmd, e.code) }
+func (e tfFailed) Unwrap() error { return exitCode(e.code) }
+
+// asTFFailed names a terraform exit status after the command that produced it.
+func asTFFailed(cmd string, err error) error {
+	var code exitCode
+	if errors.As(err, &code) {
+		return tfFailed{cmd, int(code)}
+	}
+	return err
+}
+
 type app struct {
 	stdout, stderr   io.Writer
 	stack, workspace string
 	api              *vcs.Client
+	filter           redact.Filter
 	tfBin            string // resolved terraform executable
 	tfErr            error  // why tfBin could not be resolved
 	ci               ci.CI  // nil until loadCI
@@ -83,9 +119,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		workspace: envOr("TFPR_WORKSPACE", "default"),
 		api:       vcs.NewGitHubClient(os.Getenv("GITHUB_API_URL"), githubToken()),
 	}
+	a.filter = redact.Configured(stderr, a.logIssue)
 	a.tfBin, a.tfErr = resolveExecutable(envOr("TFPR_TF_BIN", "terraform"))
 	commands := map[string]func() error{
 		"plan":             a.plan,
+		"derive":           a.derive,
 		"render":           a.render,
 		"comment":          a.comment,
 		"decide":           a.decide,
@@ -98,7 +136,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	f, ok := commands[cmd]
 	if !ok {
-		return a.exit(errors.New("usage: tfpr plan|render|comment|decide|apply|resolve-plan-run"))
+		return a.exit(errors.New("usage: tfpr plan|derive|render|comment|decide|apply|resolve-plan-run"))
 	}
 	return a.exit(f())
 }
@@ -136,6 +174,16 @@ func (a *app) loadVCS() (vcs.VCS, error) {
 
 func (a *app) repo() string { return envOr("TFPR_REPO", a.ctx.Repo) }
 
+// logIssue logs a warning or error re-emitted from filtered text, through
+// the CI once it is loaded.
+func (a *app) logIssue(level, msg string) {
+	if a.ci != nil {
+		a.ci.Log(level, msg)
+		return
+	}
+	fmt.Fprintf(a.stderr, "tfpr: %s: %s\n", level, msg)
+}
+
 // log prints msg at a CI log level, or as plain output when level is "".
 func (a *app) log(level, msg string) {
 	if level == "" {
@@ -164,7 +212,7 @@ func (a *app) terraform(dir string, stdout, stderr io.Writer, args ...string) er
 	}
 	cmd := exec.Command(a.tfBin, args...)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, stdout, stderr
-	cmd.Env = terraformEnv(os.Environ())
+	cmd.Env = redact.WithoutTFPR(os.Environ())
 	err := cmd.Run()
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ee.ExitCode() > 0 {
@@ -173,16 +221,39 @@ func (a *app) terraform(dir string, stdout, stderr io.Writer, args ...string) er
 	return err
 }
 
-// tf runs terraform in dir with its output passed through.
+// tf runs terraform in dir with its output echoed through the filter, in a
+// region where the CI interprets no commands.
 func (a *app) tf(dir string, args ...string) error {
-	return a.terraform(dir, a.stdout, a.stderr, args...)
+	iout, ierr := a.ci.Inert(a.stdout), a.ci.Inert(a.stderr)
+	out, errOut := a.filter.Writer(iout), a.filter.Writer(ierr)
+	err := a.terraform(dir, out, errOut, args...)
+	return closeAll(err, out, errOut, iout, ierr)
 }
 
-// tfOutput runs terraform in dir and returns its stdout.
+// tfOutput runs terraform in dir and returns its stdout unfiltered; its
+// stderr is echoed like tf's.
 func (a *app) tfOutput(dir string, args ...string) ([]byte, error) {
 	var out bytes.Buffer
-	err := a.terraform(dir, &out, a.stderr, args...)
-	return out.Bytes(), err
+	ierr := a.ci.Inert(a.stderr)
+	errOut := a.filter.Writer(ierr)
+	err := a.terraform(dir, &out, errOut, args...)
+	return out.Bytes(), closeAll(err, errOut, ierr)
+}
+
+// closeAll closes ws in order (filters before the inert regions they write
+// into). A close failure, such as a failed filter, wins over err: output may
+// have been lost, so the command must fail.
+func closeAll(err error, ws ...io.Closer) error {
+	var first error
+	for _, w := range ws {
+		if cerr := w.Close(); cerr != nil && first == nil {
+			first = cerr
+		}
+	}
+	if first != nil {
+		return first
+	}
+	return err
 }
 
 func (a *app) terraformVersion(dir string) string {
@@ -199,8 +270,17 @@ func (a *app) terraformVersion(dir string) string {
 	return v.Version
 }
 
-func (a *app) plan() error {
+// plan runs terraform and writes the plan dir. If anything fails, the plan
+// dir still gets a PlanResult with status error and the reason, so the
+// comment step (which runs even when plan fails) replaces the last good plan.
+func (a *app) plan() (err error) {
 	a.loadCI()
+	tool := core.Tool{Runner: "terraform", Binary: filepath.Base(a.tfBin)}
+	defer func() {
+		if err != nil {
+			a.recordFailure(tool, a.filter.Mode(), nil, err)
+		}
+	}()
 	dir := a.stack
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("stack directory '%s' not found", dir)
@@ -211,7 +291,7 @@ func (a *app) plan() error {
 		{"validate", "-no-color"},
 	} {
 		if err := a.tf(dir, args...); err != nil {
-			return err
+			return asTFFailed(args[0], err)
 		}
 	}
 	// -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes. Only 1 fails.
@@ -227,10 +307,13 @@ func (a *app) plan() error {
 		return err
 	}
 	if code == 1 {
-		return exitCode(1)
+		return tfFailed{"plan", 1}
 	}
 
+	// plan.json stays in the stack, next to tfplan; it holds values in
+	// clear text and is read only for structure.
 	planJSON, err := a.tfOutput(dir, "show", "-json", "tfplan")
+	err = asTFFailed("show", err)
 	if err == nil {
 		err = os.WriteFile(filepath.Join(dir, "plan.json"), planJSON, 0o644)
 	}
@@ -238,16 +321,27 @@ func (a *app) plan() error {
 		return err
 	}
 	planTxt, err := a.tfOutput(dir, "show", "-no-color", "tfplan")
-	if err == nil {
-		err = os.WriteFile(filepath.Join(dir, "plan.txt"), planTxt, 0o644)
+	if err != nil {
+		return asTFFailed("show", err)
 	}
+	text, err := a.filter.Apply(string(planTxt))
 	if err != nil {
 		return err
 	}
-	stats, err := core.PlanStats(planJSON)
+	planfileSHA, err := fileSHA256(filepath.Join(dir, "tfplan"))
 	if err != nil {
 		return err
 	}
+	unit, format, err := a.deriveUnit(core.UnitInput{Path: ".", PlanJSON: planJSON, ExitCode: &code, PlanfileSHA256: planfileSHA}, text)
+	if err != nil {
+		return err
+	}
+	tool.BinaryVersion, tool.PlanFormatVersion = a.terraformVersion(dir), format
+	r, err := a.writePlanDir(unit, &text, tool, a.filter.Mode())
+	if err != nil {
+		return err
+	}
+	stats := core.StatsOf(r.Summary.Counts)
 	fields := append(stats.Fields(), core.Field{Name: "plan_artifact_name", Value: core.ArtifactName(a.stack, a.workspace)})
 	if err := a.outputs(fields...); err != nil {
 		return err
@@ -264,7 +358,7 @@ func (a *app) plan() error {
 		HasChanges       bool   `json:"has_changes"`
 		HasImports       bool   `json:"has_imports"`
 	}{a.ctx.SHA, a.ctx.PR, a.ctx.Actor, time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-		a.stack, a.workspace, a.terraformVersion(dir), stats.HasChanges(), stats.HasImports()}
+		a.stack, a.workspace, r.Tool.BinaryVersion, stats.HasChanges(), stats.HasImports()}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -275,44 +369,42 @@ func (a *app) plan() error {
 	return os.WriteFile(filepath.Join(dir, "plan-metadata.json"), buf.Bytes(), 0o644)
 }
 
+// render prints the plan comment from the plan dir. The body is plan
+// content, so it is echoed where the CI interprets no commands.
 func (a *app) render() error {
-	body, err := a.renderPlan(os.Getenv("TFPR_RUN_ID"), os.Getenv("TFPR_JOB_URL"))
+	a.loadCI()
+	r, text, err := a.readPlanDir()
 	if err != nil {
 		return err
 	}
-	_, err = io.WriteString(a.stdout, body)
-	return err
+	body, _, err := a.renderPlan(r, text, os.Getenv("TFPR_RUN_ID"), os.Getenv("TFPR_JOB_URL"))
+	if err != nil {
+		return err
+	}
+	w := a.ci.Inert(a.stdout)
+	_, err = io.WriteString(w, body.String())
+	return closeAll(err, w)
 }
 
-func (a *app) renderPlan(runID, jobURL string) (string, error) {
-	exit := os.Getenv("TFPR_EXIT_CODE")
-	if exit == "" {
-		return "", errors.New("TFPR_EXIT_CODE is required")
-	}
+// renderPlan renders the plan comment and passes the whole body through the
+// filter. It also returns the comment's marker.
+func (a *app) renderPlan(r core.PlanResult, text []byte, runID, jobURL string) (redact.Text, string, error) {
 	b := envOr("TFPR_COMMENT_BUDGET", "45000")
 	budget, err := strconv.Atoi(b)
 	if err != nil || budget < 0 {
-		return "", fmt.Errorf("TFPR_COMMENT_BUDGET must be a byte count, got '%s'", b)
+		return redact.Text{}, "", fmt.Errorf("TFPR_COMMENT_BUDGET must be a byte count, got '%s'", b)
 	}
-	planJSON, err := os.ReadFile(filepath.Join(a.stack, "plan.json"))
+	body, err := core.RenderPlan(core.PlanComment{Result: r, PlanText: text, RunID: runID, JobURL: jobURL, Budget: budget})
 	if err != nil {
-		return "", err
+		return redact.Text{}, "", err
 	}
-	stats, err := core.PlanStats(planJSON)
-	if err != nil {
-		return "", err
-	}
-	planTxt, err := os.ReadFile(filepath.Join(a.stack, "plan.txt"))
-	if err != nil {
-		return "", err
-	}
-	return core.RenderPlan(core.PlanComment{
-		Stack: a.stack, Workspace: a.workspace, ExitCode: exit,
-		RunID: runID, JobURL: jobURL,
-		Stats: stats, PlanText: planTxt, Budget: budget,
-	})
+	t, err := a.filter.Apply(body)
+	return t, core.PlanMarker(r.Target.Stack, r.Target.Workspace), err
 }
 
+// comment posts the plan comment from the plan dir. A failed plan posts a
+// "plan failed" body over the stack's comment. So does a missing plan dir:
+// comment records the failure itself, posts it, and exits non-zero.
 func (a *app) comment() error {
 	a.loadCI()
 	v, err := a.loadVCS()
@@ -324,18 +416,37 @@ func (a *app) comment() error {
 		fmt.Fprintln(a.stdout, "Not a pull request build; skipping plan comment.")
 		return nil
 	}
-	body, err := a.renderPlan(a.ctx.RunID, a.ci.JobURL())
+	r, text, err := a.readPlanDir()
+	missing := errors.Is(err, errNoPlanResult)
+	if missing {
+		a.recordFailure(core.Tool{Runner: "byo"}, a.filter.Mode(), nil, err)
+		r, text, err = a.readPlanDir()
+	}
 	if err != nil {
 		return err
 	}
-	// Best effort: the plan succeeded, and a comment API failure shouldn't hide that.
-	msg, err := v.UpsertComment(pr, core.PlanMarker(a.stack, a.workspace), body)
+	body, marker, err := a.renderPlan(r, text, a.ctx.RunID, a.ci.JobURL())
+	if errors.Is(err, redact.ErrFailed) {
+		return fmt.Errorf("%w; nothing was posted", err)
+	}
 	if err != nil {
+		return err
+	}
+	// Best effort: a comment API failure shouldn't hide the plan's own result.
+	msg, err := v.UpsertComment(pr, marker, body)
+	switch {
+	case err != nil && r.Summary.Status == core.StatusError:
+		fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
+		a.ci.Log(ci.Warning, "Could not post the plan-failed comment on PR #"+pr+".")
+	case err != nil:
 		fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
 		a.ci.Log(ci.Warning, "Could not post the plan comment on PR #"+pr+"; the plan itself succeeded.")
-		return nil
+	default:
+		fmt.Fprintln(a.stdout, msg)
 	}
-	fmt.Fprintln(a.stdout, msg)
+	if missing {
+		return fmt.Errorf("%s: no plan-result.json; posted a plan-failed comment", a.planDir())
+	}
 	return nil
 }
 
@@ -431,7 +542,13 @@ func (a *app) apply() error {
 		return err
 	}
 	// Best effort: a comment API failure must not change the apply's result.
-	if err := a.postApplyComment(v, d, code, used, usePlanfile, attempt); err != nil {
+	// A filter failure does: nothing was posted, and the step must fail.
+	if err := a.postApplyComment(v, d, code, used, usePlanfile, attempt); errors.Is(err, redact.ErrFailed) {
+		a.ci.Log(ci.Error, err.Error()+"; nothing was posted")
+		if code == 0 {
+			code = 1
+		}
+	} else if err != nil {
 		fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
 		a.ci.Log(ci.Warning, fmt.Sprintf("Could not post the apply-result comment; the apply exit code (%d) stands.", code))
 	}
@@ -487,13 +604,17 @@ func (a *app) postApplyComment(v vcs.VCS, d core.Decision, code int, used, usePl
 	if usePlanfile && core.IsFirstAttempt(attempt) {
 		artifact = core.ArtifactName(a.stack, a.workspace)
 	}
-	body, err := core.RenderApply(core.ApplyComment{
+	raw, err := core.RenderApply(core.ApplyComment{
 		Stack: a.stack, Workspace: a.workspace,
 		Decision: d, ExitCode: code, UsedPlanfile: used,
 		Artifact: artifact, PlanRun: os.Getenv("TFPR_PLAN_RUN_ID"),
 		RunID: a.ctx.RunID, RunURL: a.ctx.RunURL, SHA: sha,
 		TerraformVersion: a.terraformVersion(""),
 	})
+	if err != nil {
+		return err
+	}
+	body, err := a.filter.Apply(raw)
 	if err != nil {
 		return err
 	}
@@ -561,17 +682,6 @@ func resolveExecutable(name string) (string, error) {
 		return exec.LookPath(name)
 	}
 	return filepath.Abs(name)
-}
-
-// terraformEnv is env without any TFPR_* variable.
-func terraformEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		if !strings.HasPrefix(kv, "TFPR_") {
-			out = append(out, kv)
-		}
-	}
-	return out
 }
 
 // githubToken is the token for GitHub API calls: TFPR_GITHUB_TOKEN, which the

@@ -54,14 +54,22 @@ assert_golden() {
 # lines are headers), with tabs turned into \x1f so `read` keeps empty fields.
 cases() { grep -v '^#' "${root}/test/cases/$1" | tr '\t' '\037'; }
 
-# --- render golden files ----------------------------------------------------
+# --- derive + render golden files --------------------------------------------
+# Each fixture is a plan the caller made itself: derive writes the plan dir
+# (golden plan-result.json), render prints the comment (golden expected.md).
 cd "${root}/test/fixtures/render"
 for dir in */; do
   name="${dir%/}"
   budget=45000
   [[ -f "${name}/budget" ]] && budget="$(cat "${name}/budget")"
-  env -i PATH="${PATH}" TFPR_STACK="${name}" TFPR_WORKSPACE=default \
-    TFPR_EXIT_CODE="$(cat "${name}/exit_code")" \
+  rm -rf "${sandbox}/plandir"
+  env -i PATH="${PATH}" TFPR_STACK="${name}" TFPR_WORKSPACE=default TFPR_DIR="${sandbox}/plandir" \
+    TFPR_PLAN_JSON="${name}/plan.json" TFPR_PLAN_TXT="${name}/plan.txt" TFPR_EXIT_CODE="$(cat "${name}/exit_code")" \
+    "${tfpr}" derive > /dev/null 2>&1 || fail "derive ${name}"
+  # The tfpr version is the only field that depends on the build.
+  sed 's/"version": "[^"]*"/"version": "<version>"/' "${sandbox}/plandir/plan-result.json" > "${sandbox}/plan-result.json"
+  assert_golden "derive ${name}" "render/${name}/plan-result.json" "${sandbox}/plan-result.json"
+  env -i PATH="${PATH}" TFPR_DIR="${sandbox}/plandir" \
     TFPR_RUN_ID=1234 TFPR_JOB_URL="https://ci.example/run/1234/job/5678" \
     TFPR_COMMENT_BUDGET="${budget}" \
     "${tfpr}" render > "${sandbox}/render.md"
@@ -82,7 +90,7 @@ cat > "${sandbox}/terraform" << 'EOF'
 echo "terraform $*" >> "${FAKE_LOG}"
 case "$1" in
   version) echo '{"terraform_version":"0.0.0"}' ;;
-  plan) exit "${FAKE_TF_PLAN_CODE:-0}" ;;
+  plan) echo "binary plan" > tfplan; exit "${FAKE_TF_PLAN_CODE:-0}" ;;
   show) if [[ "$2" == "-json" ]]; then cat "${FAKE_TF_PLAN}/plan.json"; else cat "${FAKE_TF_PLAN}/plan.txt"; fi ;;
   apply) exit "${FAKE_TF_APPLY_CODE:-0}" ;;
 esac
@@ -127,7 +135,39 @@ assert_golden "plan: step outputs" plan/outputs "${sandbox}/outputs"
 # created_at is the only field that varies between runs.
 sed 's/"created_at": "[^"]*"/"created_at": "<now>"/' "${ws}/stack/plan-metadata.json" > "${sandbox}/metadata"
 assert_golden "plan: plan-metadata.json" plan/plan-metadata.json "${sandbox}/metadata"
-if cmp -s "${root}/test/fixtures/render/changes/plan.txt" "${ws}/stack/plan.txt"; then pass; else fail "plan: plan.txt"; fi
+if cmp -s "${root}/test/fixtures/render/changes/plan.txt" "${ws}/stack/.tfpr/units/plan.txt"; then pass; else
+  fail "plan: plan text in the plan dir"; fi
+assert_has "plan: plan-result.json" "$(cat "${ws}/stack/.tfpr/plan-result.json")" '"schema": "tfpr/plan-result@1"'
+if [[ -e "${ws}/stack/.tfpr/units/plan.json" ]]; then fail "plan: plan.json leaked into the plan dir"; else pass; fi
+
+# Bring your own plan with TFPR_FILTER: the caller's text and the names from
+# plan.json are filtered before anything is stored or printed.
+new_ws
+run_tfpr derive TFPR_PLAN_JSON="${root}/test/fixtures/render/changes/plan.json" \
+  TFPR_PLAN_TXT="${root}/test/fixtures/render/changes/plan.txt" TFPR_FILTER="sed s/beta/REDACTED/g"
+assert_eq "byo + filter: exit code" 0 "${RC}"
+assert_lacks "byo + filter: plan text" "$(cat "${ws}/stack/.tfpr/units/plan.txt")" "beta"
+assert_lacks "byo + filter: plan-result.json" "$(cat "${ws}/stack/.tfpr/plan-result.json")" "beta"
+assert_has "byo + filter: mode" "$(cat "${ws}/stack/.tfpr/plan-result.json")" '"mode": "filter"'
+run_tfpr render TFPR_FILTER="sed s/beta/REDACTED/g"
+assert_has "byo + filter: rendered" "${OUT}" 'terraform_data.item["REDACTED"] will be destroyed'
+run_tfpr render TFPR_FILTER="exit 1"
+assert_eq "failing filter: render fails" 1 "${RC}"
+assert_lacks "failing filter: prints no body" "${OUT}" "tf-plan:"
+
+# A failed plan still produces a result, and render says the plan failed.
+new_ws
+run_tfpr derive TFPR_EXIT_CODE=1
+assert_eq "byo failed plan: exit code" 1 "${RC}"
+assert_has "byo failed plan: status" "$(cat "${ws}/stack/.tfpr/plan-result.json")" '"status": "error"'
+run_tfpr render
+assert_has "byo failed plan: rendered" "${OUT}" "Plan failed for <code>stack</code>"
+
+# derive refuses plan.json with stderr mixed in.
+{ cat "${root}/test/fixtures/render/changes/plan.json"; echo "Warning: from stderr"; } > "${ws}/broken.json"
+run_tfpr derive TFPR_PLAN_JSON=broken.json TFPR_PLAN_TXT="${root}/test/fixtures/render/changes/plan.txt"
+assert_eq "derive, broken plan.json: exit code" 1 "${RC}"
+assert_has "derive, broken plan.json: hint" "${OUT}" "stderr merged into stdout?"
 
 new_ws
 run_tfpr plan FAKE_TF_PLAN_CODE=1
@@ -180,7 +220,7 @@ assert_has "decide on a re-run skips the download" "${OUTPUTS}" "download=false"
 
 run_tfpr nonsense
 assert_eq "unknown command: exit code" 1 "${RC}"
-assert_has "unknown command: usage" "${OUT}" "usage: tfpr plan|render|comment|decide|apply|resolve-plan-run"
+assert_has "unknown command: usage" "${OUT}" "usage: tfpr plan|derive|render|comment|decide|apply|resolve-plan-run"
 
 # --- action wrappers (static checks) ----------------------------------------
 # assert_yaml NAME FILE LINE: FILE contains LINE (whitespace-trimmed) verbatim.
@@ -198,6 +238,10 @@ assert_yaml "plan artifact retention is an input" plan/action.yml \
   'retention-days: ${{ inputs.retention_days }}'
 assert_eq "plan retention_days default" 'default: "7"' \
   "$(grep -A6 '^  retention_days:' "${root}/plan/action.yml" | grep -m1 'default:' | sed 's/^ *//')"
+
+# shellcheck disable=SC2016
+assert_yaml "the plan comment runs when the plan failed" plan/action.yml \
+  "if: always() && github.event_name == 'pull_request'"
 
 # shellcheck disable=SC2016
 assert_yaml "apply downloads outside the stack" apply/action.yml \

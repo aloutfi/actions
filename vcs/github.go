@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/aloutfi/actions/redact"
 )
 
 // DefaultGitHubAuthor is the login of the default GITHUB_TOKEN identity.
@@ -54,7 +56,7 @@ type issueComment struct {
 // UpsertComment edits the first comment by the adapter's author that starts
 // with marker, or posts a new one. A human who pastes the marker into their
 // own comment never has it overwritten.
-func (g *GitHub) UpsertComment(pr, marker, body string) (string, error) {
+func (g *GitHub) UpsertComment(pr, marker string, body redact.Text) (string, error) {
 	var id int64
 	// If the listing fails, tfpr cannot know whether its comment exists, and
 	// posting could duplicate it, so it gives up instead.
@@ -71,7 +73,7 @@ func (g *GitHub) UpsertComment(pr, marker, body string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("list comments on PR #%s: %w", pr, err)
 	}
-	payload := map[string]string{"body": body}
+	payload := map[string]string{"body": body.String()}
 	if id != 0 {
 		if _, err := g.api.Do(http.MethodPatch, fmt.Sprintf("/repos/%s/issues/comments/%d", g.repo, id), payload, nil); err != nil {
 			return "", err

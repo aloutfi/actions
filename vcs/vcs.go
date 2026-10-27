@@ -2,7 +2,11 @@
 // port, plus the shared REST client the adapters use.
 package vcs
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/aloutfi/actions/redact"
+)
 
 // PR is a pull request associated with a commit.
 type PR struct {
@@ -15,7 +19,8 @@ type PR struct {
 type VCS interface {
 	// UpsertComment updates the adapter's own comment on pr whose body starts
 	// with marker, or posts a new one. It returns a line describing what it did.
-	UpsertComment(pr, marker, body string) (string, error)
+	// The body must have been through the redaction filter (redact.Text).
+	UpsertComment(pr, marker string, body redact.Text) (string, error)
 	// PRsForCommit lists the PRs associated with sha, such as the PR that merged it.
 	PRsForCommit(sha string) ([]PR, error)
 	// BranchHead is the current head commit of branch (short name).

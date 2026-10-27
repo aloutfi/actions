@@ -1,0 +1,98 @@
+{
+  "schema": "tfpr/plan-result@1",
+  "tool": {
+    "version": "<version>",
+    "runner": "byo",
+    "plan_format_version": "1.2"
+  },
+  "target": {
+    "stack": "moved-removed",
+    "workspace": "default",
+    "key": "moved-removed:default"
+  },
+  "source": {
+    "sha": "",
+    "tree": "",
+    "pr": null
+  },
+  "run": {
+    "ci": "local",
+    "attempt": 0
+  },
+  "summary": {
+    "exit_code": 2,
+    "status": "state_only",
+    "counts": {
+      "create": 0,
+      "update": 0,
+      "delete": 0,
+      "replace": 0,
+      "import": 0,
+      "forget": 2,
+      "move": 1,
+      "read": 0,
+      "output": 0
+    },
+    "units": {
+      "total": 1,
+      "changed": 1,
+      "error": 0,
+      "not_run": 0,
+      "provisional": 0,
+      "apply_needed": 1
+    }
+  },
+  "units": [
+    {
+      "path": ".",
+      "exit_code": 2,
+      "status": "state_only",
+      "counts": {
+        "create": 0,
+        "update": 0,
+        "delete": 0,
+        "replace": 0,
+        "import": 0,
+        "forget": 2,
+        "move": 1,
+        "read": 0,
+        "output": 0
+      },
+      "resources": [
+        {
+          "address": "terraform_data.anchor",
+          "previous_address": "terraform_data.pinned",
+          "action": "move",
+          "moved": true,
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"alpha\"]",
+          "action": "forget",
+          "reason": "delete_because_no_resource_config",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"beta\"]",
+          "action": "forget",
+          "reason": "delete_because_no_resource_config",
+          "mode": "managed"
+        }
+      ],
+      "outputs": [],
+      "drift": 0,
+      "text_chars": 1026,
+      "fingerprint": "sha256:5aff4a3f1b771eea5d0f3bd2595bf063e518b487083a76561148d9eba144fb9a",
+      "planfile": {
+        "present": false
+      },
+      "dependencies": [],
+      "state_empty": false,
+      "provisional": false,
+      "skippable": false
+    }
+  ],
+  "redaction": {
+    "mode": "byo"
+  }
+}

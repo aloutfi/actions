@@ -87,7 +87,8 @@ echo "terraform $*" >> "$FAKE_LOG"
 env > "$FAKE_LOG.env"
 case "$1" in
   version) echo '{"terraform_version":"0.0.0"}' ;;
-  plan) exit "${FAKE_TF_PLAN_CODE:-0}" ;;
+  plan) echo "binary plan" > tfplan; echo "  # terraform_data.secret-key will be created"
+        [ -z "$FAKE_TF_SAY" ] || echo "$FAKE_TF_SAY"; exit "${FAKE_TF_PLAN_CODE:-0}" ;;
   show) if [ "$2" = "-json" ]; then cat "$FAKE_TF_PLAN/plan.json"; else cat "$FAKE_TF_PLAN/plan.txt"; fi ;;
   apply) exit "${FAKE_TF_APPLY_CODE:-0}" ;;
 esac
@@ -141,7 +142,7 @@ func newScenario(t *testing.T) *scenario {
 	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN", "TFPR_GITHUB_TOKEN", "TFPR_EXIT_CODE", "TFPR_RUN_ID", "TFPR_JOB_URL",
 		"TFPR_COMMENT_BUDGET", "TFPR_COMMENT_AUTHOR", "TFPR_USE_PLANFILE", "TFPR_ALLOW_FRESH_PLAN_FALLBACK",
 		"TFPR_PLAN_DIR", "TFPR_PLAN_RUN_ID", "TFPR_LOCK_TIMEOUT", "TFPR_PLAN_WORKFLOW", "TFPR_VCS",
-		"TFPR_REPO", "TFPR_OUTPUT_FILE", "FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE"} {
+		"TFPR_REPO", "TFPR_OUTPUT_FILE", "TFPR_DIR", "TFPR_FILTER", "TFPR_PLAN_JSON", "TFPR_PLAN_TXT", "TFPR_PLANFILE", "FAKE_TF_PLAN", "FAKE_TF_PLAN_CODE", "FAKE_TF_APPLY_CODE", "FAKE_TF_SAY"} {
 		env[k] = ""
 	}
 	return &scenario{t: t, ws: ws, gh: gh, env: env}
@@ -167,12 +168,27 @@ func (s *scenario) write(name, content string) {
 	must(s.t, os.WriteFile(filepath.Join(s.ws, name), []byte(content), 0o644))
 }
 
-func (s *scenario) copyFixture(fixture string) {
-	for _, f := range []string{"plan.json", "plan.txt"} {
-		data, err := os.ReadFile(filepath.Join(root, "test", "fixtures", "render", fixture, f))
-		must(s.t, err)
-		must(s.t, os.WriteFile(filepath.Join(s.ws, "stack", f), data, 0o644))
+// byo runs `tfpr derive` on a render fixture, as a caller that ran terraform
+// itself, and fails the test if it does not succeed.
+func (s *scenario) byo(fixture string) result {
+	s.t.Helper()
+	dir := filepath.Join(root, "test", "fixtures", "render", fixture)
+	exit, err := os.ReadFile(filepath.Join(dir, "exit_code"))
+	must(s.t, err)
+	s.set("TFPR_PLAN_JSON", filepath.Join(dir, "plan.json"), "TFPR_PLAN_TXT", filepath.Join(dir, "plan.txt"),
+		"TFPR_EXIT_CODE", strings.TrimSpace(string(exit)))
+	r := s.run("derive")
+	if r.rc != 0 {
+		s.t.Fatalf("derive failed:\n%s", r.out)
 	}
+	return r
+}
+
+// planResult reads the plan dir's plan-result.json.
+func (s *scenario) planResult() string {
+	data, err := os.ReadFile(filepath.Join(s.ws, "stack", ".tfpr", "plan-result.json"))
+	must(s.t, err)
+	return string(data)
 }
 
 func (s *scenario) run(cmd string) result {
@@ -180,7 +196,10 @@ func (s *scenario) run(cmd string) result {
 		s.t.Setenv(k, v)
 	}
 	s.t.Chdir(s.ws)
-	var out bytes.Buffer
+	// Each run starts with empty logs; the fake API keeps its call history.
+	must(s.t, os.WriteFile(s.env["GITHUB_OUTPUT"], nil, 0o644))
+	must(s.t, os.WriteFile(s.env["FAKE_LOG"], nil, 0o644))
+	var out syncBuffer
 	rc := run([]string{cmd}, &out, &out)
 	read := func(name string) string {
 		data, _ := os.ReadFile(s.env[name])
@@ -188,6 +207,25 @@ func (s *scenario) run(cmd string) result {
 	}
 	return result{rc: rc, out: out.String(), outputs: read("GITHUB_OUTPUT"), tf: read("FAKE_LOG"),
 		api: strings.Join(s.gh.calls, "\n"), body: s.gh.body}
+}
+
+// syncBuffer collects stdout and stderr together. Filters and terraform
+// write to it from several goroutines, which a bare bytes.Buffer would race on.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 var root = filepath.Join("..", "..")
@@ -250,11 +288,17 @@ func TestPlan(t *testing.T) {
 	must(t, err)
 	created := regexp.MustCompile(`"created_at": "\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ"`)
 	golden(t, "plan/plan-metadata.json", created.ReplaceAllString(string(meta), `"created_at": "<now>"`))
-	txt, err := os.ReadFile(filepath.Join(s.ws, "stack", "plan.txt"))
+	txt, err := os.ReadFile(filepath.Join(s.ws, "stack", ".tfpr", "units", "plan.txt"))
 	must(t, err)
 	want, err := os.ReadFile(filepath.Join(root, "test", "fixtures", "render", "changes", "plan.txt"))
 	must(t, err)
 	eq(t, "plan.txt", string(want), string(txt))
+	res := s.planResult()
+	for _, want := range []string{`"runner": "terraform"`, `"sha": "abc"`, `"status": "changes"`, `"mode": "none"`, `"present": true`} {
+		has(t, "plan-result.json", res, want)
+	}
+	_, err = os.Stat(filepath.Join(s.ws, "stack", ".tfpr", "units", "plan.json"))
+	eq(t, "plan.json stays out of the plan dir", true, os.IsNotExist(err))
 }
 
 func TestPlanError(t *testing.T) {
@@ -307,7 +351,7 @@ func TestCommentFailuresAreBestEffort(t *testing.T) {
 	eq(t, "apply fails: exit code", 3, s.run("apply").rc)
 
 	s = newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_EXIT_CODE", "0")
-	s.copyFixture("no-changes")
+	s.byo("no-changes")
 	s.gh.failWrites = true
 	r = s.run("comment")
 	eq(t, "plan comment: exit code", 0, r.rc)
@@ -316,7 +360,7 @@ func TestCommentFailuresAreBestEffort(t *testing.T) {
 
 func TestCommentPosts(t *testing.T) {
 	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_EXIT_CODE", "0")
-	s.copyFixture("no-changes")
+	s.byo("no-changes")
 	r := s.run("comment")
 	eq(t, "exit code", 0, r.rc)
 	has(t, "posts", r.api, "POST /repos/o/r/issues/42/comments")
@@ -328,7 +372,7 @@ func TestCommentPosts(t *testing.T) {
 // and metadata.
 func TestStackIsCleaned(t *testing.T) {
 	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_EXIT_CODE", "0", "TFPR_STACK", "./stack/")
-	s.copyFixture("no-changes")
+	s.byo("no-changes")
 	r := s.run("comment")
 	golden(t, "comments/plan.md", r.body)
 
@@ -341,7 +385,7 @@ func TestStackIsCleaned(t *testing.T) {
 
 func TestCommentUpdatesOwnComment(t *testing.T) {
 	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_EXIT_CODE", "0")
-	s.copyFixture("no-changes")
+	s.byo("no-changes")
 	s.gh.comments = `[{"id":5,"user":{"login":"someone"},"body":"<!-- tf-plan:stack :: default -->"},
 		{"id":6,"user":{"login":"github-actions[bot]"},"body":"<!-- tf-plan:stack :: default -->\nold"}]`
 	r := s.run("comment")
@@ -353,7 +397,7 @@ func TestCommentUpdatesOwnComment(t *testing.T) {
 // the comment is skipped with a warning.
 func TestCommentSkipsWhenListingFails(t *testing.T) {
 	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request", "TFPR_EXIT_CODE", "0")
-	s.copyFixture("no-changes")
+	s.byo("no-changes")
 	s.gh.failList = true
 	r := s.run("comment")
 	eq(t, "exit code", 0, r.rc)
@@ -584,8 +628,253 @@ func TestTokenIsolation(t *testing.T) {
 	eq(t, "GH_TOKEN fallback", "Bearer gh-token", s.gh.auth)
 }
 
+// plan and comment can run as separate steps: comment needs only the plan dir
+// and the API token, not terraform.
+func TestPlanThenCommentInAnotherStep(t *testing.T) {
+	s := newScenario(t).set("FAKE_TF_PLAN", filepath.Join(root, "test", "fixtures", "render", "changes"), "FAKE_TF_PLAN_CODE", "2")
+	eq(t, "plan: exit code", 0, s.run("plan").rc)
+	s.set("GITHUB_EVENT_NAME", "pull_request", "TFPR_GITHUB_TOKEN", "vcs-only", "TFPR_TF_BIN", "/nonexistent/terraform")
+	r := s.run("comment")
+	eq(t, "comment: exit code", 0, r.rc)
+	eq(t, "comment: no terraform", "", r.tf)
+	has(t, "comment: record", r.body, `"apply":["."]`)
+	has(t, "comment: planset", r.body, `"planset":"sha256:`)
+}
+
+// TFPR_FILTER covers terraform's echoed output, the stored plan text, the
+// names in plan-result.json and the comment body.
+func TestPlanFilter(t *testing.T) {
+	s := newScenario(t).set("FAKE_TF_PLAN", filepath.Join(root, "test", "fixtures", "render", "changes"), "FAKE_TF_PLAN_CODE", "2",
+		"TFPR_FILTER", `sed -e s/secret-key/REDACTED/g -e 's/"beta"/"REDACTED"/g'`)
+	r := s.run("plan")
+	eq(t, "exit code", 0, r.rc)
+	has(t, "echoed output", r.out, "terraform_data.REDACTED will be created")
+	lacks(t, "echoed output", r.out, "secret-key")
+	txt, err := os.ReadFile(filepath.Join(s.ws, "stack", ".tfpr", "units", "plan.txt"))
+	must(t, err)
+	has(t, "plan text", string(txt), `terraform_data.item["REDACTED"] will be destroyed`)
+	lacks(t, "plan text", string(txt), `"beta"`)
+	res := s.planResult()
+	has(t, "plan-result.json", res, `"address": "terraform_data.item[\"REDACTED\"]"`)
+	lacks(t, "plan-result.json", res, `beta`)
+	has(t, "plan-result.json", res, `"mode": "filter"`)
+
+	s.set("GITHUB_EVENT_NAME", "pull_request")
+	r = s.run("comment")
+	eq(t, "comment: exit code", 0, r.rc)
+	has(t, "comment body", r.body, `terraform_data.item["REDACTED"] will be destroyed`)
+	lacks(t, "comment body", r.body, `"beta"`)
+}
+
+func TestPlanFilterFailureFailsThePlan(t *testing.T) {
+	r := newScenario(t).set("FAKE_TF_PLAN", filepath.Join(root, "test", "fixtures", "render", "changes"), "TFPR_FILTER", "exit 3").run("plan")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "says why", r.out, "redaction filter failed")
+}
+
+// Bring your own plan: the caller's text still passes through TFPR_FILTER,
+// both when derive stores it and when comment posts it.
+func TestBYOFilter(t *testing.T) {
+	s := newScenario(t).set("TFPR_FILTER", `sed 's/"beta"/"REDACTED"/g'`)
+	s.byo("changes")
+	txt, err := os.ReadFile(filepath.Join(s.ws, "stack", ".tfpr", "units", "plan.txt"))
+	must(t, err)
+	lacks(t, "stored plan text", string(txt), `"beta"`)
+	res := s.planResult()
+	lacks(t, "plan-result.json", res, "beta")
+	has(t, "plan-result.json", res, `"runner": "byo"`)
+	has(t, "plan-result.json", res, `"mode": "filter"`)
+
+	// Without TFPR_FILTER, the caller's scrubber is trusted: mode byo. The
+	// egress filter still covers every name in the comment body.
+	s = newScenario(t)
+	s.byo("changes")
+	has(t, "no filter: mode", s.planResult(), `"mode": "byo"`)
+	s.set("GITHUB_EVENT_NAME", "pull_request", "TFPR_FILTER", `sed 's/"beta"/"REDACTED"/g'`)
+	r := s.run("comment")
+	eq(t, "comment: exit code", 0, r.rc)
+	has(t, "address in the diff summary", r.body, `- terraform_data.item["REDACTED"] will be destroyed`)
+	lacks(t, "comment body", r.body, `"beta"`)
+}
+
+// A filter failure posts nothing and fails the command.
+func TestCommentFilterFailurePostsNothing(t *testing.T) {
+	s := newScenario(t)
+	s.byo("changes")
+	s.set("GITHUB_EVENT_NAME", "pull_request", "TFPR_FILTER", "cat >/dev/null; exit 1")
+	r := s.run("comment")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "says why", r.out, "::error::redaction filter failed")
+	has(t, "says nothing was posted", r.out, "nothing was posted")
+	lacks(t, "no write", r.api, "POST")
+	lacks(t, "no write", r.api, "PATCH")
+}
+
+func TestApplyCommentFilterFailure(t *testing.T) {
+	s := newScenario(t).set("TFPR_FILTER", `in=$(cat); case "$in" in *tf-apply*) exit 1;; esac; printf '%s\n' "$in"`)
+	r := s.run("apply")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "says why", r.out, "nothing was posted")
+	lacks(t, "no write", r.api, "POST")
+	has(t, "terraform's own result stands in the outputs", r.outputs, "apply_exit_code=0")
+}
+
+// derive parses plan.json strictly and fails closed.
+func TestDeriveRejectsBrokenPlanJSON(t *testing.T) {
+	fixture, err := os.ReadFile(filepath.Join(root, "test", "fixtures", "render", "changes", "plan.json"))
+	must(t, err)
+	for name, data := range map[string]string{
+		"stderr after":  string(fixture) + "\nWarning: something on stderr\n",
+		"stderr before": "Warning: something on stderr\n" + string(fixture),
+		"truncated":     string(fixture[:len(fixture)/2]),
+		"not a plan":    `{"hello": "world"}`,
+	} {
+		s := newScenario(t)
+		s.write("plan.json", data)
+		s.write("plan.txt", "plan text\n")
+		r := s.set("TFPR_PLAN_JSON", "plan.json", "TFPR_PLAN_TXT", "plan.txt").run("derive")
+		eq(t, name+": exit code", 1, r.rc)
+		has(t, name+": names the input", r.out, "plan.json is not the output of `terraform show -json`")
+		res := s.planResult()
+		has(t, name+": records the failure", res, `"status": "error"`)
+		has(t, name+": records why", res, "plan.json is not the output of `terraform show -json`")
+		lacks(t, name+": no plan text", res, `"present": true`)
+	}
+	s := newScenario(t)
+	s.write("plan.json", string(fixture)+"\ntrailing")
+	s.write("plan.txt", "x")
+	has(t, "hint", s.set("TFPR_PLAN_JSON", "plan.json", "TFPR_PLAN_TXT", "plan.txt").run("derive").out, "stderr merged into stdout?")
+}
+
+// Missing inputs are a failed plan, recorded with the reason.
+func TestDeriveMissingInputs(t *testing.T) {
+	s := newScenario(t)
+	r := s.run("derive")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "message", r.out, "::error::TFPR_PLAN_JSON is not set")
+	has(t, "recorded", s.planResult(), `"error": "TFPR_PLAN_JSON is not set`)
+
+	s = newScenario(t).set("TFPR_PLAN_JSON", "gone.json", "TFPR_PLAN_TXT", "gone.txt", "TFPR_EXIT_CODE", "2")
+	r = s.run("derive")
+	eq(t, "missing files: exit code", 1, r.rc)
+	res := s.planResult()
+	has(t, "missing files: reason", res, "TFPR_PLAN_JSON: gone.json does not exist (did the plan run?)")
+	has(t, "missing files: status", res, `"status": "error"`)
+	has(t, "missing files: summary exit", res, `"exit_code": 1`)
+}
+
+// A failed plan replaces the stack's last good comment instead of leaving
+// it standing as if current.
+func TestPlanFailureReplacesTheComment(t *testing.T) {
+	s := newScenario(t).set("FAKE_TF_PLAN_CODE", "1")
+	r := s.run("plan")
+	eq(t, "plan: exit code", 1, r.rc)
+	res := s.planResult()
+	has(t, "plan: status", res, `"status": "error"`)
+	has(t, "plan: reason", res, `"error": "terraform plan exited 1"`)
+	has(t, "plan: unit exit code", res, `"exit_code": 1,`)
+
+	s.gh.comments = `[{"id":6,"user":{"login":"github-actions[bot]"},"body":"<!-- tf-plan:stack :: default -->\nold good plan"}]`
+	r = s.set("GITHUB_EVENT_NAME", "pull_request").run("comment")
+	eq(t, "comment: exit code", 0, r.rc)
+	has(t, "comment: replaces the good plan", r.api, "PATCH /repos/o/r/issues/comments/6")
+	golden(t, "comments/plan-failed.md", r.body)
+}
+
+func TestBYOFailedPlan(t *testing.T) {
+	s := newScenario(t).set("TFPR_EXIT_CODE", "1", "TFPR_PLAN_JSON", "missing.json")
+	r := s.run("derive")
+	eq(t, "derive: exit code", 1, r.rc)
+	has(t, "derive: says so", r.out, "the plan failed (TFPR_EXIT_CODE=1)")
+	has(t, "derive: unit exit code", s.planResult(), `"exit_code": 1,`)
+	r = s.set("GITHUB_EVENT_NAME", "pull_request").run("comment")
+	eq(t, "comment: exit code", 0, r.rc)
+	has(t, "comment: failed body", r.body, "Plan failed for <code>stack</code>")
+	has(t, "comment: reason", r.body, "**Reason:** the plan failed (TFPR_EXIT_CODE=1)")
+}
+
+// With no plan dir at all, comment records and posts the failure itself and
+// exits non-zero.
+func TestCommentWithoutPlanDir(t *testing.T) {
+	s := newScenario(t).set("GITHUB_EVENT_NAME", "pull_request")
+	r := s.run("comment")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "posts", r.api, "POST /repos/o/r/issues/42/comments")
+	has(t, "failed body", r.body, "Plan failed for <code>stack</code>")
+	has(t, "reason", r.body, "no plan-result.json in stack/.tfpr")
+	has(t, "records it", s.planResult(), `"status": "error"`)
+}
+
+// CI command lines from a filter's side output or from plan text never land
+// in a comment. Warnings and errors among them are re-emitted, escaped; the
+// rest are dropped and counted.
+func TestCICommandsNeverReachTheComment(t *testing.T) {
+	s := newScenario(t)
+	plan, err := os.ReadFile(filepath.Join(root, "test", "fixtures", "render", "changes", "plan.txt"))
+	must(t, err)
+	s.write("plan.txt", string(plan)+"  ##vso[task.setvariable variable=x]pwned\n::set-output name=a::b\n::error::boom 100%\n")
+	s.set("TFPR_PLAN_JSON", filepath.Join(root, "test", "fixtures", "render", "changes", "plan.json"), "TFPR_PLAN_TXT", "plan.txt",
+		"TFPR_FILTER", `cat; echo '##vso[task.logissue type=warning]masked 3 values'`)
+	r := s.run("derive")
+	eq(t, "derive: exit code", 0, r.rc)
+	has(t, "re-emits the filter's warning", r.out, "::warning::masked 3 values\n")
+	has(t, "re-emits the plan's error, escaped", r.out, "::error::boom 100%25\n")
+	has(t, "counts the rest", r.out, "::warning::Dropped 2 CI command line(s)")
+	txt, err := os.ReadFile(filepath.Join(s.ws, "stack", ".tfpr", "units", "plan.txt"))
+	must(t, err)
+	for _, cmd := range []string{"##vso[", "\n::"} {
+		lacks(t, "stored plan text", string(txt), cmd)
+	}
+	r = s.set("GITHUB_EVENT_NAME", "pull_request").run("comment")
+	eq(t, "comment: exit code", 0, r.rc)
+	for _, cmd := range []string{"##vso[", "::set-output", "::error", "masked 3 values"} {
+		lacks(t, "comment body", r.body, cmd)
+	}
+}
+
+// Terraform output and rendered comments are echoed where GitHub interprets
+// no workflow commands.
+func TestEchoedContentIsInert(t *testing.T) {
+	s := newScenario(t).set("FAKE_TF_PLAN", filepath.Join(root, "test", "fixtures", "render", "changes"), "FAKE_TF_PLAN_CODE", "2",
+		"FAKE_TF_SAY", "::warning::from terraform")
+	r := s.run("plan")
+	eq(t, "plan: exit code", 0, r.rc)
+	eq(t, "terraform's command line is inside a stopped region", true, insideStopped(r.out, "::warning::from terraform"))
+
+	r = s.run("render")
+	eq(t, "render: exit code", 0, r.rc)
+	if !strings.HasPrefix(r.out, "::stop-commands::") || !regexp.MustCompile(`\n::[0-9a-f]{32}::\n$`).MatchString(r.out) {
+		t.Errorf("render output is not wrapped:\n%.300s", r.out)
+	}
+}
+
+// insideStopped reports whether line appears in out while GitHub's workflow
+// commands are stopped (between ::stop-commands::<token> and ::<token>::).
+func insideStopped(out, line string) bool {
+	token := ""
+	for _, l := range strings.Split(out, "\n") {
+		switch {
+		case token == "" && strings.HasPrefix(l, "::stop-commands::"):
+			token = strings.TrimPrefix(l, "::stop-commands::")
+		case token != "" && l == "::"+token+"::":
+			token = ""
+		case l == line:
+			return token != ""
+		}
+	}
+	return false
+}
+
+func TestDeriveRequiresValidExitCode(t *testing.T) {
+	s := newScenario(t).set("TFPR_EXIT_CODE", "3")
+	r := s.run("derive")
+	eq(t, "exit code", 1, r.rc)
+	has(t, "message", r.out, "TFPR_EXIT_CODE must be 0, 1 or 2")
+	has(t, "recorded", s.planResult(), `"status": "error"`)
+}
+
 func TestUsage(t *testing.T) {
 	var out bytes.Buffer
 	eq(t, "exit code", 1, run(nil, &out, &out))
-	has(t, "message", out.String(), "tfpr: usage: tfpr plan|render|comment|decide|apply|resolve-plan-run")
+	has(t, "message", out.String(), "tfpr: usage: tfpr plan|derive|render|comment|decide|apply|resolve-plan-run")
 }

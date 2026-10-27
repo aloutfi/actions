@@ -1,0 +1,83 @@
+{
+  "schema": "tfpr/plan-result@1",
+  "tool": {
+    "version": "<version>",
+    "runner": "byo",
+    "plan_format_version": "1.2"
+  },
+  "target": {
+    "stack": "output-only",
+    "workspace": "default",
+    "key": "output-only:default"
+  },
+  "source": {
+    "sha": "",
+    "tree": "",
+    "pr": null
+  },
+  "run": {
+    "ci": "local",
+    "attempt": 0
+  },
+  "summary": {
+    "exit_code": 2,
+    "status": "outputs_only",
+    "counts": {
+      "create": 0,
+      "update": 0,
+      "delete": 0,
+      "replace": 0,
+      "import": 0,
+      "forget": 0,
+      "move": 0,
+      "read": 0,
+      "output": 1
+    },
+    "units": {
+      "total": 1,
+      "changed": 1,
+      "error": 0,
+      "not_run": 0,
+      "provisional": 0,
+      "apply_needed": 1
+    }
+  },
+  "units": [
+    {
+      "path": ".",
+      "exit_code": 2,
+      "status": "outputs_only",
+      "counts": {
+        "create": 0,
+        "update": 0,
+        "delete": 0,
+        "replace": 0,
+        "import": 0,
+        "forget": 0,
+        "move": 0,
+        "read": 0,
+        "output": 1
+      },
+      "resources": [],
+      "outputs": [
+        {
+          "name": "label",
+          "action": "update"
+        }
+      ],
+      "drift": 0,
+      "text_chars": 181,
+      "fingerprint": "sha256:518f6873a7429d627a9faf912430ffe523e575917598cd7dbc0160081df3a9c3",
+      "planfile": {
+        "present": false
+      },
+      "dependencies": [],
+      "state_empty": false,
+      "provisional": false,
+      "skippable": false
+    }
+  ],
+  "redaction": {
+    "mode": "byo"
+  }
+}

@@ -47,18 +47,31 @@ func TestDecidePlanSource(t *testing.T) {
 	}
 }
 
+// fixtureUnit derives the "." unit from a render fixture.
+func fixtureUnit(t *testing.T, name string) Unit {
+	t.Helper()
+	read := func(f string) []byte {
+		data, err := os.ReadFile(filepath.Join("..", "test", "fixtures", "render", name, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	exit, err := strconv.Atoi(strings.TrimSpace(string(read("exit_code"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _, err := DeriveUnit(UnitInput{Path: ".", PlanJSON: read("plan.json"), PlanText: string(read("plan.txt")), ExitCode: &exit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
 func TestPlanStats(t *testing.T) {
 	for _, c := range cases(t, "plan_stats.tsv", 13) {
-		data, err := os.ReadFile(filepath.Join("..", "test", "fixtures", "render", c[0], "plan.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		s, err := PlanStats(data)
-		if err != nil {
-			t.Fatal(err)
-		}
 		var got []string
-		for _, f := range s.Fields() {
+		for _, f := range StatsOf(fixtureUnit(t, c[0]).Counts).Fields() {
 			got = append(got, f.Value)
 		}
 		if g, w := strings.Join(got, "|"), strings.Join(c[1:], "|"); g != w {
@@ -90,7 +103,8 @@ func TestCleanStack(t *testing.T) {
 	}
 }
 
-// TestRenderPlanGoldens renders each fixture the way test/run.sh does.
+// TestRenderPlanGoldens renders each fixture the way test/run.sh does:
+// derive (no CI, no filter), then render.
 func TestRenderPlanGoldens(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join("..", "test", "fixtures", "render", "*"))
 	if err != nil || len(dirs) == 0 {
@@ -99,31 +113,27 @@ func TestRenderPlanGoldens(t *testing.T) {
 	for _, dir := range dirs {
 		name := filepath.Base(dir)
 		t.Run(name, func(t *testing.T) {
-			read := func(f string) []byte {
-				data, err := os.ReadFile(filepath.Join(dir, f))
-				if err != nil {
-					t.Fatal(err)
-				}
-				return data
-			}
 			budget := 45000
 			if b, err := os.ReadFile(filepath.Join(dir, "budget")); err == nil {
 				budget, _ = strconv.Atoi(strings.TrimSpace(string(b)))
 			}
-			stats, err := PlanStats(read("plan.json"))
+			text, err := os.ReadFile(filepath.Join(dir, "plan.txt"))
 			if err != nil {
 				t.Fatal(err)
 			}
+			r := NewPlanResult(PlanResult{Target: Target{Stack: name, Workspace: "default"}}, []Unit{fixtureUnit(t, name)})
 			got, err := RenderPlan(PlanComment{
-				Stack: name, Workspace: "default",
-				ExitCode: strings.TrimSpace(string(read("exit_code"))),
-				RunID:    "1234", JobURL: "https://ci.example/run/1234/job/5678",
-				Stats: stats, PlanText: read("plan.txt"), Budget: budget,
+				Result: r, PlanText: text, Budget: budget,
+				RunID: "1234", JobURL: "https://ci.example/run/1234/job/5678",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := string(read("expected.md")); got != want {
+			want, err := os.ReadFile(filepath.Join(dir, "expected.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != string(want) {
 				t.Errorf("render differs from expected.md:\n%s", got)
 			}
 		})
@@ -189,5 +199,31 @@ func TestSupersededGuard(t *testing.T) {
 		if got.Code != c.code || got.Level != c.level || !strings.Contains(got.Message, c.msg) {
 			t.Errorf("%s: got %+v, want code %d level %q containing %q", c.name, got, c.code, c.level, c.msg)
 		}
+	}
+}
+
+func TestFailedUnit(t *testing.T) {
+	r := NewPlanResult(PlanResult{Target: Target{Stack: "infra", Workspace: "default"}},
+		[]Unit{FailedUnit(".", intp(1), "terraform plan exited 1")})
+	if r.Summary.Status != StatusError || r.Summary.ExitCode != 1 || r.Summary.Units.Error != 1 || r.Units[0].Skippable {
+		t.Errorf("summary %+v", r.Summary)
+	}
+	body, err := RenderPlan(PlanComment{Result: r, RunID: "7", JobURL: "https://ci.example/7"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"<!-- tf-plan:infra :: default -->\n<!-- tfpr:plan@1 {",
+		`"status":"error"`,
+		"Plan failed for <code>infra</code>; see [#7](https://ci.example/7).",
+		"**Reason:** terraform plan exited 1",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in\n%s", want, body)
+		}
+	}
+	body, _ = RenderPlan(PlanComment{Result: r})
+	if !strings.Contains(body, "see the CI log.") {
+		t.Errorf("no run link: %s", body)
 	}
 }

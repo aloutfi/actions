@@ -1,0 +1,296 @@
+{
+  "schema": "tfpr/plan-result@1",
+  "tool": {
+    "version": "<version>",
+    "runner": "byo",
+    "plan_format_version": "1.2"
+  },
+  "target": {
+    "stack": "truncated",
+    "workspace": "default",
+    "key": "truncated:default"
+  },
+  "source": {
+    "sha": "",
+    "tree": "",
+    "pr": null
+  },
+  "run": {
+    "ci": "local",
+    "attempt": 0
+  },
+  "summary": {
+    "exit_code": 2,
+    "status": "changes",
+    "counts": {
+      "create": 40,
+      "update": 0,
+      "delete": 2,
+      "replace": 0,
+      "import": 0,
+      "forget": 0,
+      "move": 0,
+      "read": 0,
+      "output": 1
+    },
+    "units": {
+      "total": 1,
+      "changed": 1,
+      "error": 0,
+      "not_run": 0,
+      "provisional": 0,
+      "apply_needed": 1
+    }
+  },
+  "units": [
+    {
+      "path": ".",
+      "exit_code": 2,
+      "status": "changes",
+      "counts": {
+        "create": 40,
+        "update": 0,
+        "delete": 2,
+        "replace": 0,
+        "import": 0,
+        "forget": 0,
+        "move": 0,
+        "read": 0,
+        "output": 1
+      },
+      "resources": [
+        {
+          "address": "terraform_data.item[\"alpha\"]",
+          "action": "delete",
+          "reason": "delete_because_each_key",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"beta\"]",
+          "action": "delete",
+          "reason": "delete_because_each_key",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item01\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item02\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item03\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item04\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item05\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item06\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item07\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item08\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item09\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item10\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item11\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item12\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item13\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item14\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item15\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item16\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item17\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item18\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item19\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item20\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item21\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item22\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item23\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item24\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item25\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item26\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item27\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item28\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item29\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item30\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item31\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item32\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item33\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item34\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item35\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item36\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item37\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item38\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item39\"]",
+          "action": "create",
+          "mode": "managed"
+        },
+        {
+          "address": "terraform_data.item[\"item40\"]",
+          "action": "create",
+          "mode": "managed"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "item_count",
+          "action": "update"
+        }
+      ],
+      "drift": 0,
+      "text_chars": 8767,
+      "fingerprint": "sha256:bf0a9be777e6805c471ea049f648e0d114f9f1cee7dd490aa8ee8be48c89684e",
+      "planfile": {
+        "present": false
+      },
+      "dependencies": [],
+      "state_empty": false,
+      "provisional": false,
+      "skippable": false
+    }
+  ],
+  "redaction": {
+    "mode": "byo"
+  }
+}

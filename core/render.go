@@ -18,21 +18,32 @@ const truncationNotice = "[truncated — download the tfplan artifact and run `t
 
 // PlanComment is everything the plan comment shows.
 type PlanComment struct {
-	Stack, Workspace string
-	ExitCode         string // terraform plan -detailed-exitcode
-	RunID, JobURL    string // the run link
-	Stats            Stats
-	PlanText         []byte // terraform show -no-color output
-	Budget           int    // max bytes of PlanText in the comment
+	Result        PlanResult // exactly one unit in this layout, unless the plan failed
+	PlanText      []byte     // that unit's plan text, already filtered; nil when it failed
+	RunID, JobURL string     // the run link
+	Budget        int        // max bytes of PlanText in the comment
 }
 
-// RenderPlan renders the plan comment body.
+// RenderPlan renders the plan comment body. Its second line is the comment
+// record (Record).
 func RenderPlan(c PlanComment) (string, error) {
-	s := c.Stats
+	r := c.Result
+	if r.Summary.Status == StatusError {
+		return renderFailed(c)
+	}
+	if len(r.Units) != 1 {
+		return "", fmt.Errorf("the plan comment layout shows one unit; this result has %d", len(r.Units))
+	}
+	s := StatsOf(r.Summary.Counts)
 	view := struct {
-		PlanComment
-		Marker, Open, Icon, Counts, DiffSummary, PlanText string
-	}{PlanComment: c, Marker: PlanMarker(c.Stack, c.Workspace)}
+		Stack, Workspace, ExitCode, RunID, JobURL                 string
+		Stats                                                     Stats
+		Marker, Record, Open, Icon, Counts, DiffSummary, PlanText string
+	}{
+		Stack: r.Target.Stack, Workspace: r.Target.Workspace, ExitCode: strconv.Itoa(r.Summary.ExitCode),
+		RunID: c.RunID, JobURL: c.JobURL, Stats: s,
+		Marker: PlanMarker(r.Target.Stack, r.Target.Workspace), Record: Record(r),
+	}
 
 	view.Icon = "✅"
 	if s.HasOutputChanges() {
@@ -60,6 +71,22 @@ func RenderPlan(c PlanComment) (string, error) {
 	view.DiffSummary = DiffSummary(c.PlanText)
 	view.PlanText = truncate(c.PlanText, c.Budget)
 	return execute("plan.md.tmpl", view)
+}
+
+// renderFailed renders the comment for a failed plan. It replaces the
+// stack's earlier comment, so an older plan never stands as if current.
+func renderFailed(c PlanComment) (string, error) {
+	r := c.Result
+	var reasons []string
+	for _, u := range r.Units {
+		if u.Error != "" {
+			reasons = append(reasons, u.Error)
+		}
+	}
+	return execute("plan-failed.md.tmpl", struct {
+		Marker, Record, Stack, Workspace, RunID, JobURL, Reason string
+	}{PlanMarker(r.Target.Stack, r.Target.Workspace), Record(r), r.Target.Stack, r.Target.Workspace,
+		c.RunID, c.JobURL, strings.Join(reasons, "; ")})
 }
 
 // truncate cuts plan text to budget bytes so the comment stays under the
