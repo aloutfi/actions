@@ -44,6 +44,9 @@ var errNoPlanResult = errors.New("no plan-result.json")
 // the comment replaces the last good plan; derive then exits non-zero.
 func (a *app) derive() (err error) {
 	a.loadCI()
+	if _, err := runMode(); err != nil {
+		return err
+	}
 	var exit *int
 	// The mode reflects only TFPR_FILTER: a caller's own scrubber saw
 	// plan.txt, never the names tfpr copies from plan.json.

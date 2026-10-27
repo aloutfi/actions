@@ -58,6 +58,12 @@
 //	TFPR_PLAN_RUN_ID                apply: run that produced the planfile (default: the
 //	                                run named in the PR's plan record)
 //	TFPR_LOCK_TIMEOUT               apply: -lock-timeout (5m)
+//	TFPR_MODE                       plan/derive/comment: pr (default) or drift. In drift
+//	                                mode comment touches no PR: it writes the full plan to
+//	                                the run summary, sets has_changes, and warns (and on
+//	                                Azure Pipelines tags the run "drift") if anything drifted
+//	TFPR_FAIL_ON_DRIFT              comment, drift mode: on drift, Azure Pipelines ends the
+//	                                step SucceededWithIssues; elsewhere it fails (false)
 //	TFPR_APPLY_EXIT_CODE            report: your terraform apply's exit code
 //	TFPR_APPLY_LOG                  report: your terraform apply's output, scrubbed (optional)
 //	TFPR_VCS                        repo host: github, azure or none (default: where
@@ -356,6 +362,9 @@ func (a *app) terraformVersion(dir string) string {
 // comment step (which runs even when plan fails) replaces the last good plan.
 func (a *app) plan() (err error) {
 	a.loadCI()
+	if _, err := runMode(); err != nil {
+		return err
+	}
 	tool := core.Tool{Runner: "terraform", Binary: filepath.Base(a.tfBin)}
 	var planCode *int // terraform plan's exit code, once it ran
 	defer func() {
@@ -488,6 +497,13 @@ func (a *app) render() error {
 // comment records the failure itself, posts it, and exits non-zero.
 func (a *app) comment() error {
 	a.loadCI()
+	mode, err := runMode()
+	if err != nil {
+		return err
+	}
+	if mode == "drift" {
+		return a.drift()
+	}
 	v, err := a.loadVCS()
 	if err != nil {
 		return err

@@ -62,6 +62,17 @@ type SummaryLinker interface {
 	SummaryURL() string
 }
 
+// Tagger is a CI that can tag the run (Azure Pipelines build tags).
+type Tagger interface {
+	AddBuildTag(tag string) error
+}
+
+// PartialSucceeder is a CI that can end a step as "succeeded with issues"
+// (Azure Pipelines). Others have only pass and fail.
+type PartialSucceeder interface {
+	CompleteWithIssues(msg string) error
+}
+
 // Env reads an environment variable; os.Getenv in production.
 type Env func(string) string
 
