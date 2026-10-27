@@ -12,10 +12,10 @@ vcs_upsert_comment() {
       '.[] | select(.user.login == $author) | select(.body | startswith($marker)) | .id' |
     head -n 1 || true)"
   if [[ -n "${id}" ]]; then
-    gh api -X PATCH "repos/${TFPR_REPO}/issues/comments/${id}" -F "body=@${body_file}" > /dev/null
+    gh api -X PATCH "repos/${TFPR_REPO}/issues/comments/${id}" -F "body=@${body_file}" > /dev/null || return 1
     echo "Updated comment ${id} on PR #${pr}"
   else
-    gh api -X POST "repos/${TFPR_REPO}/issues/${pr}/comments" -F "body=@${body_file}" > /dev/null
+    gh api -X POST "repos/${TFPR_REPO}/issues/${pr}/comments" -F "body=@${body_file}" > /dev/null || return 1
     echo "Posted comment on PR #${pr}"
   fi
 }

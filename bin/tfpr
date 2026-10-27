@@ -271,7 +271,9 @@ cmd_comment() {
   TFPR_JOB_URL="$(ci_job_url)"
   body="$(mktemp)"
   cmd_render > "${body}"
-  vcs_upsert_comment "${pr}" "$(plan_marker "${TFPR_STACK}" "${TFPR_WORKSPACE}")" "${body}" "${TFPR_COMMENT_AUTHOR:-}"
+  # Best effort: the plan succeeded, and a comment API failure shouldn't hide that.
+  vcs_upsert_comment "${pr}" "$(plan_marker "${TFPR_STACK}" "${TFPR_WORKSPACE}")" "${body}" "${TFPR_COMMENT_AUTHOR:-}" ||
+    ci_warn "Could not post the plan comment on PR #${pr}; the plan itself succeeded."
 }
 
 cmd_decide() {
@@ -358,10 +360,13 @@ cmd_apply() {
   ci_output apply_exit_code "${code}"
   ci_output used_plan_artifact "${used}"
   ci_output fallback_reason "${reason}"
-  post_apply_comment "${code}" "${source}" "${reason}" "${used}" "${use_planfile}" "${attempt}"
+  # Best effort: a comment API failure must not change the apply's result.
+  post_apply_comment "${code}" "${source}" "${reason}" "${used}" "${use_planfile}" "${attempt}" ||
+    ci_warn "Could not post the apply-result comment; the apply exit code (${code}) stands."
   return "${code}"
 }
 
+# Runs in an `||` context (errexit off), so it returns the upsert's status.
 post_apply_comment() {
   local code="$1" source="$2" reason="$3" used="$4" use_planfile="$5" attempt="$6"
   local sha pr stack="${TFPR_STACK}" ws="${TFPR_WORKSPACE:-default}" plan_run="${TFPR_PLAN_RUN_ID:-}"

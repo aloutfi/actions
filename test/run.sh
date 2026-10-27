@@ -69,6 +69,96 @@ assert_eq "artifact name default stack" "tfplan-terraform-default" "$(artifact_n
 assert_eq "artifact name nested stack" "tfplan-stacks-net-core-prod" "$(artifact_name ./stacks/net.core/ prod)"
 assert_eq "artifact name empty workspace" "tfplan-infra-default" "$(artifact_name infra '')"
 
+# --- commands against a fake GitHub ----------------------------------------
+# A fake gh and a stub terraform on PATH; GitHub Actions env simulated per call.
+sandbox="$(mktemp -d)"
+trap 'rm -rf "${sandbox}"' EXIT
+mkdir -p "${sandbox}/bin"
+cat > "${sandbox}/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+# Fake gh: logs each call; FAKE_* variables shape the responses.
+echo "gh $*" >> "${FAKE_LOG}"
+case "$*" in
+  *"-X PATCH"* | *"-X POST"*)
+    if [[ -n "${FAKE_GH_FAIL_WRITE:-}" ]]; then echo "HTTP 403: forbidden" >&2; exit 1; fi ;;
+  *"/actions/runs/"*"/jobs"*) echo '{"jobs":[]}' ;;
+  *"/issues/"*"/comments"*) echo '[]' ;;
+  *"/commits/"*"/pulls"*) [[ -z "${FAKE_PR:-}" ]] || echo "${FAKE_PR} headsha" ;;
+  *"/git/ref/heads/"*) echo "${FAKE_BRANCH_HEAD}" ;;
+  *) echo "fake gh: unexpected call: $*" >&2; exit 1 ;;
+esac
+EOF
+cat > "${sandbox}/bin/terraform" <<'EOF'
+#!/usr/bin/env bash
+# Stub terraform: logs each call; apply exits with FAKE_TF_APPLY_CODE.
+echo "terraform $*" >> "${FAKE_LOG}"
+case "$1" in
+  version) echo '{"terraform_version":"0.0.0"}' ;;
+  apply) exit "${FAKE_TF_APPLY_CODE:-0}" ;;
+esac
+EOF
+chmod +x "${sandbox}/bin/gh" "${sandbox}/bin/terraform"
+echo '{"pull_request":{"number":42}}' > "${sandbox}/event.json"
+ws="${sandbox}/ws"
+
+# new_ws: empty workspace with a stack/ directory; tests add files before run_tfpr.
+new_ws() {
+  rm -rf "${ws}"
+  mkdir -p "${ws}/stack"
+}
+
+# run_tfpr CMD [VAR=value...]: run bin/tfpr CMD in ${ws} as a first-attempt
+# push build of refs/heads/main at sha "abc", which is also the branch head.
+# Sets RC, OUT (stdout+stderr), OUTPUTS (step outputs), CALLS (gh/terraform).
+run_tfpr() {
+  local cmd="$1"
+  shift
+  : > "${sandbox}/log"
+  : > "${sandbox}/outputs"
+  RC=0
+  (cd "${ws}" && env PATH="${sandbox}/bin:${PATH}" FAKE_LOG="${sandbox}/log" \
+    GITHUB_ACTIONS=true GITHUB_OUTPUT="${sandbox}/outputs" GITHUB_REPOSITORY=o/r \
+    GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_SERVER_URL=https://github.example \
+    GITHUB_SHA=abc GITHUB_REF=refs/heads/main GITHUB_ACTOR=me RUNNER_NAME=r \
+    GITHUB_EVENT_NAME=push GITHUB_EVENT_PATH="${sandbox}/event.json" \
+    FAKE_BRANCH_HEAD=abc FAKE_PR=42 TFPR_STACK=stack TFPR_WORKSPACE=default \
+    "$@" "${root}/bin/tfpr" "${cmd}") > "${sandbox}/stdout" 2>&1 || RC=$?
+  OUT="$(cat "${sandbox}/stdout")"
+  OUTPUTS="$(cat "${sandbox}/outputs")"
+  CALLS="$(cat "${sandbox}/log")"
+}
+
+# assert_has NAME HAYSTACK NEEDLE / assert_lacks NAME HAYSTACK NEEDLE
+assert_has() {
+  if [[ "$2" == *"$3"* ]]; then pass; else fail "$1: expected to contain '$3' in:"$'\n'"$2"; fi
+}
+assert_lacks() {
+  if [[ "$2" != *"$3"* ]]; then pass; else fail "$1: expected not to contain '$3' in:"$'\n'"$2"; fi
+}
+
+# Comment failures are best effort: they warn and keep the command's result.
+new_ws
+run_tfpr apply FAKE_GH_FAIL_WRITE=1
+assert_eq "apply ok + comment fails: exit code" 0 "${RC}"
+assert_has "apply ok + comment fails: warns" "${OUT}" "::warning::Could not post the apply-result comment"
+assert_has "apply ok + comment fails: output" "${OUTPUTS}" "apply_exit_code=0"
+
+new_ws
+run_tfpr apply FAKE_GH_FAIL_WRITE=1 FAKE_TF_APPLY_CODE=3
+assert_eq "apply fails + comment fails: exit code" 3 "${RC}"
+
+new_ws
+cp "${root}/test/fixtures/render/no-changes/plan."* "${ws}/stack/"
+run_tfpr comment FAKE_GH_FAIL_WRITE=1 GITHUB_EVENT_NAME=pull_request TFPR_EXIT_CODE=0
+assert_eq "plan comment fails: exit code" 0 "${RC}"
+assert_has "plan comment fails: warns" "${OUT}" "::warning::Could not post the plan comment on PR #42"
+
+new_ws
+cp "${root}/test/fixtures/render/no-changes/plan."* "${ws}/stack/"
+run_tfpr comment GITHUB_EVENT_NAME=pull_request TFPR_EXIT_CODE=0
+assert_eq "plan comment posts: exit code" 0 "${RC}"
+assert_has "plan comment posts" "${CALLS}" "gh api -X POST repos/o/r/issues/42/comments"
+
 # --- action wrappers (static checks) ----------------------------------------
 # assert_yaml NAME FILE LINE: FILE contains LINE (whitespace-trimmed) verbatim.
 # LINE is literal GitHub expression text, so callers single-quote it.
