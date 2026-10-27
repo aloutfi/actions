@@ -1,0 +1,28 @@
+{{.Marker}}
+<details{{.Open}}>
+<summary>{{.Icon}} <b>Terraform Plan</b> — <code>{{.Stack}}</code> (<code>{{.Workspace}}</code>) — {{.Counts}}</summary>
+
+**Exit code:** `{{.ExitCode}}`  
+**Job:** [#{{.RunID}}]({{.JobURL}})
+
+| Add | Change | Destroy | Replace | **Import** | Forget | Move | Outputs |
+|---|---|---|---|---|---|---|---|
+| {{.Stats.Creates}} | {{.Stats.Updates}} | {{.Stats.Destroys}} | {{.Stats.Replaces}} | **{{.Stats.Imports}}** | {{.Stats.Forgets}} | {{.Stats.Moves}} | {{.Stats.OutputChanges}} |
+
+{{if .DiffSummary}}<details{{.Open}}><summary>🚦 Diff summary</summary>
+
+```diff
+{{.DiffSummary}}
+```
+
+</details>
+
+{{end}}<details{{.Open}}><summary>⚙️ Full terraform plan output</summary>
+
+```terraform
+{{.PlanText}}
+```
+
+</details>
+
+</details>

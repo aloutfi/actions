@@ -1,0 +1,14 @@
+exit_code=2
+creates=1
+updates=1
+destroys=1
+replaces=1
+imports=0
+forgets=0
+moves=0
+output_changes=0
+has_changes=true
+has_imports=false
+has_output_changes=false
+summary=1 to add, 1 to change, 1 to destroy, 1 to replace, 0 to import
+plan_artifact_name=tfplan-stack-default

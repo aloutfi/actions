@@ -1,7 +1,7 @@
 # actions
 
-Terraform plan → PR comment → apply, as a portable bash + jq core
-(`bin/tfpr`) with thin GitHub Actions wrappers.
+Terraform plan → PR comment → apply, as one static Go binary (`tfpr`,
+standard library only) with thin GitHub Actions wrappers.
 
 - `plan`: init, validate, and plan. Posts or updates one summary comment per
   stack and workspace on the PR. Can upload the binary planfile as an artifact.
@@ -13,6 +13,13 @@ Terraform plan → PR comment → apply, as a portable bash + jq core
 Azure DevOps support is in progress.
 
 ## Usage
+
+Pin the actions to a release tag (`@vX.Y.Z`) or to that tag's commit SHA.
+A release ref downloads a prebuilt `tfpr` that is checked against the
+checksums committed at that ref. Any other ref, such as `@main` or a branch,
+builds `tfpr` from source on every run. That takes longer, and it installs Go
+with `actions/setup-go`, which puts Go on the job's `PATH` for the steps that
+follow.
 
 ```yaml
 # On pull_request: plan and comment
@@ -27,7 +34,7 @@ jobs:
       EXAMPLE_PROVIDER_TOKEN: ${{ secrets.EXAMPLE_PROVIDER_TOKEN }} # provider credentials: job-level env
     steps:
       - uses: actions/checkout@v6
-      - uses: aloutfi/actions/plan@main
+      - uses: aloutfi/actions/plan@vX.Y.Z # a release tag, or its commit SHA
         with:
           stack: infra/
           workspace: prod
@@ -48,10 +55,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - id: plan-run
-        uses: aloutfi/actions/resolve-plan-run@main
+        uses: aloutfi/actions/resolve-plan-run@vX.Y.Z # a release tag, or its commit SHA
         with:
           plan_workflow_filename: pr.yaml
-      - uses: aloutfi/actions/apply@main
+      - uses: aloutfi/actions/apply@vX.Y.Z # a release tag, or its commit SHA
         with:
           stack: infra/
           workspace: prod
@@ -65,7 +72,9 @@ Set provider credentials as job-level `env:`. Composite actions inherit it.
 Step-level `env:` on the `uses:` step does not reach the action's inner steps.
 
 The `token` input (default `github.token`) is used only for GitHub API calls.
-It is not exposed to terraform. If you pass a GitHub App token, set
+It is not exposed to terraform: tfpr receives it as `TFPR_GITHUB_TOKEN` and
+removes every `TFPR_*` variable from terraform's environment. A `GITHUB_TOKEN`
+you set in the job's `env:` for the GitHub provider still reaches terraform. If you pass a GitHub App token, set
 `comment_author` to the App's bot login (for example, `my-app[bot]`) so the
 comment upsert finds its own comments.
 
@@ -78,7 +87,7 @@ Private module sources over SSH: start an agent in an earlier step, for example
 
 | Input | Default | |
 |---|---|---|
-| `stack` | `terraform/` | Terraform working directory |
+| `stack` | `terraform/` | Terraform working directory. Cleaned before use, so `infra/`, `./infra` and `infra` are the same stack in comments, metadata and artifact names |
 | `workspace` | `default` | Selected with `workspace select -or-create` |
 | `terraform_version` | `1.15.3` | |
 | `output_planfile` | `false` | Upload `tfplan` + `plan-metadata.json` as `tfplan-<stack-slug>-<workspace>` |
@@ -112,8 +121,8 @@ How apply chooses what to run:
 | Re-run (attempt > 1) | Fresh plan |
 
 The planfile is downloaded outside the checkout, and its `plan-metadata.json`
-must name the same `stack` and `workspace` strings as the apply. A `tfplan`
-already in the stack directory is never treated as the reviewed plan.
+must name the same `stack` and `workspace` as the apply. A `tfplan` already
+in the stack directory is never treated as the reviewed plan.
 
 Every fresh apply (any row above that says "fresh plan") first checks that the
 run's commit is still the head of its branch. Applying an older commit's tree
@@ -136,15 +145,38 @@ with `-auto-approve` would roll back everything merged since, so:
 Outputs: `run_id` and `pr_number`. Both are empty on a re-run, on a direct push,
 when several PRs match, or when no successful plan run exists.
 
+### How the actions get `tfpr`
+
+Each action's first step runs `scripts/install-tfpr.sh`, which takes the first
+of these that applies:
+
+1. `TFPR_BIN` in the job's `env:`: a path to a prebuilt `tfpr` binary.
+2. A release. Release tags carry a `checksums.txt` next to the actions. The
+   script downloads `tfpr_<version>_<os>_<arch>.tar.gz` from this repo's
+   GitHub release and checks it against that file's sha256. Pinning
+   `aloutfi/actions/plan@<tag or sha>` therefore pins the binary's bytes.
+3. Otherwise (`@main`, a branch, or any unreleased commit) it builds `tfpr`
+   from the action's own source with `actions/setup-go`. This changes the
+   job: Go is on `PATH` for every step after the action, and the build adds
+   time to each run. Pin a release to avoid both.
+
 ## Development
 
 ```sh
-test/run.sh                  # render golden files + unit tests
+go test ./...                # unit tests, render goldens, command scenarios
+test/run.sh                  # black-box CLI suite (builds tfpr; or set TFPR_BIN)
 test/run.sh --update         # rewrite golden files
 test/fixtures/generate.sh    # regenerate plan fixtures with real terraform
-shellcheck bin/tfpr lib/*/*.sh test/run.sh test/fixtures/generate.sh
+gofmt -l . && go vet ./...
+shellcheck scripts/install-tfpr.sh test/run.sh test/fixtures/generate.sh
 actionlint
 ```
 
-The adapter contract for new CI platforms and repo hosts is in
-[lib/README.md](lib/README.md).
+Layout: `core/` is pure (plan stats, naming, apply policies, comment
+templates), `ci/` holds the CI platform adapters and their detection table,
+`vcs/` holds the repo-host adapters, and `cmd/tfpr` wires them together. The
+ports are the `CI` interface in [ci/ci.go](ci/ci.go) and the `VCS` interface
+in [vcs/vcs.go](vcs/vcs.go). `test/cases/*.tsv` and the golden files under
+`test/fixtures/` are the shared behavior spec.
+
+The terraform executable is `TFPR_TF_BIN` (default `terraform`).

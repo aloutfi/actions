@@ -1,0 +1,9 @@
+# name	use_planfile	attempt	has_planfile	allow_fallback	expected
+use_planfile=false	false	1	true	false	fresh no-artifact-requested
+first attempt with artifact	true	1	true	false	planfile
+first attempt, missing artifact, fails closed	true	1	false	false	none missing-artifact
+first attempt, missing artifact, fallback allowed	true	1	false	true	fresh missing-artifact
+re-run ignores stored planfile	true	2	true	false	fresh rerun
+re-run with fallback allowed	true	3	false	true	fresh rerun
+no attempt counter ignores stored planfile	true	0	true	false	fresh rerun
+no attempt counter, fallback allowed	true	0	false	true	fresh rerun

@@ -26,9 +26,29 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Locate tfpr
+      id: tfpr
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh"'
+
+    # Unreleased refs (no checksums.txt entry) build tfpr from source.
+    - name: Set up Go
+      if: steps.tfpr.outputs.build == 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: ${{ github.action_path }}/../go.mod
+        cache: false
+
+    - name: Build tfpr
+      id: tfpr-src
+      if: steps.tfpr.outputs.build == 'true'
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh" build'
+
     - id: resolve
       shell: bash
       env:
+        TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
         TFPR_PLAN_WORKFLOW: ${{ inputs.plan_workflow_filename }}
-        GH_TOKEN: ${{ inputs.token }}
-      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" resolve-plan-run'
+        TFPR_GITHUB_TOKEN: ${{ inputs.token }}
+      run: '"${TFPR}" resolve-plan-run'

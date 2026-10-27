@@ -10,20 +10,44 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          [[ -z "${unformatted}" ]] || { echo "::error::gofmt needed: ${unformatted}"; exit 1; }
+      - name: go vet
+        run: go vet ./...
+      - name: go.mod has no requires
+        run: |
+          if grep -q '^require' go.mod; then echo "::error::third-party Go modules are not allowed"; exit 1; fi
       - name: shellcheck
-        run: shellcheck bin/tfpr lib/*/*.sh test/run.sh test/fixtures/generate.sh
+        run: shellcheck scripts/install-tfpr.sh test/run.sh test/fixtures/generate.sh
       - name: actionlint
-        run: docker run --rm -v "${PWD}:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
+        run: docker run --rm -v "${PWD}:/repo" --workdir /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - run: test/run.sh
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: go test
+        run: go test ./...
+      - name: Black-box suite
+        run: |
+          CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/tfpr" ./cmd/tfpr
+          TFPR_BIN="${RUNNER_TEMP}/tfpr" test/run.sh
 
   # Dogfood: plan the fixture stack with the local action so every PR gets a
-  # real plan comment. Fork PRs get a read-only token, so skip them.
+  # real plan comment. No release covers this ref, so the action builds tfpr
+  # from source, exercising the unreleased-ref install path. Fork PRs get a
+  # read-only token, so skip them.
   dogfood:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -32,7 +56,7 @@ jobs:
       pull-requests: write # plan comment
       actions: read # job-log link in the comment
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: ./plan
         with:
           stack: test/fixtures/stack

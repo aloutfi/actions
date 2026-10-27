@@ -63,8 +63,27 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Locate tfpr
+      id: tfpr
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh"'
+
+    # Unreleased refs (no checksums.txt entry) build tfpr from source.
+    - name: Set up Go
+      if: steps.tfpr.outputs.build == 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: ${{ github.action_path }}/../go.mod
+        cache: false
+
+    - name: Build tfpr
+      id: tfpr-src
+      if: steps.tfpr.outputs.build == 'true'
+      shell: bash
+      run: '"${GITHUB_ACTION_PATH}/../scripts/install-tfpr.sh" build'
+
     - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v4
+      uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
       with:
         terraform_version: ${{ inputs.terraform_version }}
         terraform_wrapper: false
@@ -73,17 +92,18 @@ runs:
       id: decide
       shell: bash
       env:
+        TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
         TFPR_STACK: ${{ inputs.stack }}
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
         TFPR_PLAN_DIR: ${{ runner.temp }}/tfpr-plan-artifact
-      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" decide'
+      run: '"${TFPR}" decide'
 
     - name: Download plan artifact
       if: steps.decide.outputs.download == 'true'
       # A missing artifact is handled by `tfpr apply` (fail closed or fall back).
       continue-on-error: true
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
         name: ${{ steps.decide.outputs.artifact_name }}
         # Not the stack directory: only this download may supply the reviewed plan.
@@ -97,6 +117,7 @@ runs:
       id: apply
       shell: bash
       env:
+        TFPR: ${{ steps.tfpr.outputs.path || steps.tfpr-src.outputs.path }}
         TFPR_STACK: ${{ inputs.stack }}
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
@@ -105,5 +126,5 @@ runs:
         TFPR_PLAN_RUN_ID: ${{ inputs.plan_artifact_run_id }}
         TFPR_LOCK_TIMEOUT: ${{ inputs.lock_timeout }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
-        GH_TOKEN: ${{ inputs.token }}
-      run: '"${GITHUB_ACTION_PATH}/../bin/tfpr" apply'
+        TFPR_GITHUB_TOKEN: ${{ inputs.token }}
+      run: '"${TFPR}" apply'
