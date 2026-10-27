@@ -159,6 +159,15 @@ run_tfpr comment GITHUB_EVENT_NAME=pull_request TFPR_EXIT_CODE=0
 assert_eq "plan comment posts: exit code" 0 "${RC}"
 assert_has "plan comment posts" "${CALLS}" "gh api -X POST repos/o/r/issues/42/comments"
 
+# A missing artifact fails closed and points at retention and the opt-in fallback.
+new_ws
+run_tfpr apply TFPR_USE_PLANFILE=true
+assert_eq "missing artifact: exit code" 1 "${RC}"
+assert_has "missing artifact: expiry hint" "${OUT}" "may have expired"
+assert_has "missing artifact: names retention input" "${OUT}" "retention_days"
+assert_has "missing artifact: names fallback input" "${OUT}" "allow_fresh_plan_fallback=true"
+assert_lacks "missing artifact: no apply" "${CALLS}" "terraform apply"
+
 # --- action wrappers (static checks) ----------------------------------------
 # assert_yaml NAME FILE LINE: FILE contains LINE (whitespace-trimmed) verbatim.
 # LINE is literal GitHub expression text, so callers single-quote it.
@@ -169,6 +178,12 @@ assert_yaml() {
 # shellcheck disable=SC2016
 assert_yaml "apply run-id falls back to current run" apply/action.yml \
   'run-id: ${{ inputs.plan_artifact_run_id || github.run_id }}'
+
+# shellcheck disable=SC2016
+assert_yaml "plan artifact retention is an input" plan/action.yml \
+  'retention-days: ${{ inputs.retention_days }}'
+assert_eq "plan retention_days default" 'default: "7"' \
+  "$(grep -A6 '^  retention_days:' "${root}/plan/action.yml" | grep -m1 'default:' | sed 's/^ *//')"
 
 echo "${passes} passed, ${failures} failed"
 [[ "${failures}" -eq 0 ]]

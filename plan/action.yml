@@ -22,6 +22,12 @@ inputs:
     description: Upload the binary planfile and plan-metadata.json as an artifact
     required: false
     default: "false"
+  retention_days:
+    description: >-
+      Days to keep the planfile artifact. Apply fails if the artifact has
+      expired by the time the PR merges, so keep this longer than PRs stay open.
+    required: false
+    default: "7"
   comment_author:
     description: Login that owns the PR comment. Only its comments are updated.
     required: false
@@ -76,7 +82,7 @@ runs:
         path: |
           ${{ inputs.stack }}/tfplan
           ${{ inputs.stack }}/plan-metadata.json
-        retention-days: 1
+        retention-days: ${{ inputs.retention_days }}
         if-no-files-found: error
 
     - name: Upsert PR comment

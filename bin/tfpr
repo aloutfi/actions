@@ -345,7 +345,7 @@ cmd_apply() {
       fresh:missing-artifact)
         ci_warn "Planfile artifact requested but not found; falling back to fresh-plan apply (allow_fresh_plan_fallback=true)" ;;
       none:missing-artifact)
-        ci_error "Planfile artifact requested but not found; refusing to apply a fresh, unreviewed plan. Set allow_fresh_plan_fallback=true to opt in."
+        ci_error "Planfile artifact '$(artifact_name "${TFPR_STACK}" "${TFPR_WORKSPACE}")' not found; refusing to apply a fresh, unreviewed plan. It may have expired (the plan action's retention_days input sets how long it is kept) or the plan run did not upload it. Re-run the plan, or set allow_fresh_plan_fallback=true to apply a fresh plan instead."
         code=1 ;;
       planfile:)
         echo "Found planfile from artifact; will apply it" ;;

@@ -81,7 +81,8 @@ Private module sources over SSH: start an agent in an earlier step, for example
 | `stack` | `terraform/` | Terraform working directory |
 | `workspace` | `default` | Selected with `workspace select -or-create` |
 | `terraform_version` | `1.15.3` | |
-| `output_planfile` | `false` | Upload `tfplan` + `plan-metadata.json` as `tfplan-<stack-slug>-<workspace>` (1-day retention) |
+| `output_planfile` | `false` | Upload `tfplan` + `plan-metadata.json` as `tfplan-<stack-slug>-<workspace>` |
+| `retention_days` | `7` | How long the planfile artifact is kept. Apply fails if it has expired by merge time. |
 | `comment_author` | `github-actions[bot]` | Only comments by this login are updated |
 | `token` | `github.token` | GitHub API token |
 
