@@ -841,11 +841,21 @@ func TestEchoedContentIsInert(t *testing.T) {
 	eq(t, "plan: exit code", 0, r.rc)
 	eq(t, "terraform's command line is inside a stopped region", true, insideStopped(r.out, "::warning::from terraform"))
 
-	r = s.run("render")
-	eq(t, "render: exit code", 0, r.rc)
-	if !strings.HasPrefix(r.out, "::stop-commands::") || !regexp.MustCompile(`\n::[0-9a-f]{32}::\n$`).MatchString(r.out) {
-		t.Errorf("render output is not wrapped:\n%.300s", r.out)
+}
+
+// render's stdout is data: exactly the body, which has no command lines.
+func TestRenderOutputIsTheBody(t *testing.T) {
+	s := newScenario(t)
+	s.write("plan.txt", "::warning::injected\n  # a.b will be created\n")
+	fixture := filepath.Join(root, "test", "fixtures", "render", "changes", "plan.json")
+	eq(t, "derive", 0, s.set("TFPR_PLAN_JSON", fixture, "TFPR_PLAN_TXT", "plan.txt").run("derive").rc)
+	r := s.run("render")
+	eq(t, "exit code", 0, r.rc)
+	if !strings.HasPrefix(r.out, "<!-- tf-plan:stack :: default -->\n") || !strings.HasSuffix(r.out, "</details>\n") {
+		t.Errorf("render output is not just the body:\n%s", r.out)
 	}
+	lacks(t, "no markers", r.out, "stop-commands")
+	lacks(t, "no command lines", r.out, "\n::")
 }
 
 // insideStopped reports whether line appears in out while GitHub's workflow

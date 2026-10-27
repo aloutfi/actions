@@ -120,8 +120,10 @@ from filter output and plan text:
   `::error::msg` are re-emitted through tfpr's own log, escaped.
 - Every other command line is dropped, and one warning says how many.
 
-Terraform output and `tfpr render` output are echoed inside
-`::stop-commands::` on GitHub, so nothing in them runs as a workflow command.
+Terraform output that tfpr echoes is wrapped in `::stop-commands::` on
+GitHub, so nothing in it runs as a workflow command. `tfpr render` writes
+the body as is (redirect it to a file); command lines are already stripped
+from it.
 
 ## Bring your own plan
 

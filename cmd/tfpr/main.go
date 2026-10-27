@@ -369,8 +369,9 @@ func (a *app) plan() (err error) {
 	return os.WriteFile(filepath.Join(dir, "plan-metadata.json"), buf.Bytes(), 0o644)
 }
 
-// render prints the plan comment from the plan dir. The body is plan
-// content, so it is echoed where the CI interprets no commands.
+// render prints the plan comment from the plan dir. Its stdout is data
+// (tfpr render > comment.md), so the body is written as is: it has already
+// been filtered, and CI command lines have been stripped from it.
 func (a *app) render() error {
 	a.loadCI()
 	r, text, err := a.readPlanDir()
@@ -381,9 +382,8 @@ func (a *app) render() error {
 	if err != nil {
 		return err
 	}
-	w := a.ci.Inert(a.stdout)
-	_, err = io.WriteString(w, body.String())
-	return closeAll(err, w)
+	_, err = io.WriteString(a.stdout, body.String())
+	return err
 }
 
 // renderPlan renders the plan comment and passes the whole body through the
