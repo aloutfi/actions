@@ -13,7 +13,7 @@ too large for one comment, the top of the comment looks like this:
 
 ```markdown
 ### ⚠️ Terraform plan · `large` (`default`) · 3,000 to add, 40 to change, 25 to destroy, 5 to replace
-Commit `7c79a8b` · [job log](…) · [full plan](…) · [plan.txt](…) · [tfpr v0.3.0](…) · [terraform 1.17.1](…) · redaction: none
+Commit `7c79a8b` · [job log](…) · [full plan](…) · [plan.txt](…) · [tfpr v1.0.0](…) · [terraform 1.17.1](…) · redaction: none
 
 > **Plan text truncated**: showing 42,748 of 600,946 characters; the full plan is linked above.
 > **Resource list shortened**: every delete, replace and forget is listed; 2,556 lower-risk lines are counted, not listed.

@@ -1,21 +1,19 @@
 name: release
 
-# Builds tfpr for every supported platform, commits checksums.txt on a
-# release commit, tags that commit v<version>, attests the archives and
-# publishes them as a GitHub release.
+# Releases the version in VERSION when a push to main changes it: builds tfpr
+# for every supported platform, commits checksums.txt on a release commit,
+# tags that commit v<version>, attests the archives, publishes them as a
+# GitHub release, and moves v<major> and v<major>.<minor> to it.
 #
-# The release commit is reachable only from its tag, never from main. The
+# The release commit is reachable only from its tags, never from main. The
 # composite actions download a release only when checksums.txt is in their
 # own tree, so a pinned tag (or its commit sha) pins the binary's bytes, and
 # every other ref builds from source.
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Version to release, without the leading v (for example 0.2.0)
-        required: true
-        type: string
+  push:
+    branches: [main]
+    paths: [VERSION]
 
 permissions:
   contents: read
@@ -26,14 +24,11 @@ concurrency:
 
 jobs:
   release:
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the tag, create the release
       id-token: write # build provenance
       attestations: write # build provenance
-    env:
-      VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
@@ -44,10 +39,12 @@ jobs:
 
       - name: Check the version
         run: |
+          VERSION="$(< VERSION)"
           [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || {
-            echo "::error::version '${VERSION}' is not semver without a leading v"
+            echo "::error::VERSION '${VERSION}' is not semver without a leading v"
             exit 1
           }
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
           if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" > /dev/null; then
             echo "::error::tag v${VERSION} already exists"
             exit 1
@@ -94,11 +91,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo "Pin the actions to \`v${VERSION}\` or to the tag's commit sha; the sums below are a convenience."
-            echo "The trust root is \`checksums.txt\` committed at that tag."
+            echo "Pin the actions to \`v${VERSION%%.*}\` (fixes and features), \`v${VERSION%.*}\` (fixes), \`v${VERSION}\` or its commit sha."
+            echo "The trust root is \`checksums.txt\` committed at the tag; the sums below are a convenience."
             echo
             echo '```'
             cat checksums.txt
             echo '```'
           } > notes.md
           gh release create "v${VERSION}" dist/* --verify-tag --title "v${VERSION}" --notes-file notes.md
+
+      - name: Move v<major> and v<major>.<minor>
+        if: ${{ !contains(env.VERSION, '-') }} # not for prereleases
+        run: |
+          for tag in "v${VERSION%%.*}" "v${VERSION%.*}"; do git tag -f -a "${tag}" -m "${tag}: v${VERSION}"; done
+          git push --force origin "refs/tags/v${VERSION%%.*}" "refs/tags/v${VERSION%.*}"
