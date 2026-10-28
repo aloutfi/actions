@@ -16,9 +16,9 @@ inputs:
     required: false
     default: "default"
   terraform_version:
-    description: Terraform version
+    description: Terraform version (1.15.9 or later)
     required: false
-    default: "1.15.3"
+    default: "1.17.1"
   output_planfile:
     description: Upload the binary planfile and plan-metadata.json as an artifact
     required: false

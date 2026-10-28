@@ -21,9 +21,9 @@ inputs:
     required: false
     default: "default"
   terraform_version:
-    description: Terraform version
+    description: Terraform version (1.15.9 or later)
     required: false
-    default: "1.15.3"
+    default: "1.17.1"
   use_planfile:
     description: >-
       Download and apply the planfile produced by the plan action. Re-runs
