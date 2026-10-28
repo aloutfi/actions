@@ -1233,10 +1233,11 @@ func TestAzureJobSummary(t *testing.T) {
 	summary, err := os.ReadFile(m[1])
 	must(t, err)
 	has(t, "summary: the plan", string(summary), "Terraform plan")
-	lacks(t, "summary: Azure dialect", string(summary), "<details")
+	lacks(t, "summary: headings on the Extensions tab", string(summary), "<details")
 	content := ado.created["comments"].([]any)[0].(map[string]any)["content"].(string)
 	has(t, "comment links the run for the full plan", content, "[full plan]("+srv.URL+"/org/proj/_build/results?buildId=812)")
-	lacks(t, "comment: Azure dialect", content, "<details")
+	has(t, "comment: collapsible plan", content, "<details><summary>Plan output for stack</summary>")
+	has(t, "comment: coloured resource list", content, "```diff")
 }
 
 func TestAzureTokenNeverReachesTerraform(t *testing.T) {

@@ -312,26 +312,26 @@ combine the matrix legs' outputs in a later job:
 - `tfpr comment` uploads the full, filtered plan as the run's summary
   (`task.uploadsummary`), on the run's **Extensions** tab. That tab has no
   stable URL of its own, so the comment's "full plan" link opens the run.
-- Until a real PR shows what Azure Repos renders, the comment uses a
-  conservative dialect: headings instead of collapsible `<details>` blocks,
-  plain code fences instead of ```` ```diff ```` (each resource line still
-  says its action), and at most 140,000 characters.
+- PR threads use the same layout as GitHub: collapsible `<details>` blocks
+  and a colored ```` ```diff ```` resource list, at most 140,000 characters
+  (comments of about 135,600 have posted). ```` ```terraform ```` fences are
+  not highlighted on Azure Repos, but render as plain code.
+- The Extensions-tab summary uses headings instead of `<details>`; it is
+  shown expanded anyway.
+- A PR build plans the merge commit. tfpr records `Build.SourceVersion` (the
+  merge commit) as `source.sha` and the PR head,
+  `System.PullRequest.SourceCommitId`, as `source.head_sha`, like GitHub
+  Actions, where `GITHUB_SHA` is the merge commit. The comment and the log
+  name both.
 
 ## Not yet verified on a real PR
 
-These are assumptions until checked on a test PR:
+These are assumptions until checked:
 
-- Whether `<details>` and `<summary>` render in PR threads, and whether a
-  ```` ```diff ```` fence is colored. If they do, the dialect can switch to
-  them.
-- The comment size limit, reportedly about 150,000 characters. tfpr stays
-  under 140,000.
+- Whether the Extensions tab renders `<details>`. Until it is checked, the
+  summary uses headings.
 - The size limit of `task.uploadsummary`, which is undocumented. tfpr keeps
   the summary under 512 KiB and falls back to a minimal summary past that.
-- Which commits a PR build sees. tfpr records the checked-out commit,
-  `Build.SourceVersion` (the merge commit), as `source.sha`, and the PR head,
-  `System.PullRequest.SourceCommitId`, as `source.head_sha`. This matches
-  GitHub Actions, where `GITHUB_SHA` is the merge commit. It logs both.
 
 ## Why no step template
 

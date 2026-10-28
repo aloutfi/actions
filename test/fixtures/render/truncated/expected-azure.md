@@ -1,14 +1,14 @@
 ### ⚠️ Terraform plan · `truncated` (`default`) · 40 to add, 0 to change, 2 to destroy
 [job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · [terraform 1.15.4](https://github.com/hashicorp/terraform/releases/tag/v1.15.4) · redaction: none
 
-> **Plan text truncated**: showing 3,221 of 8,766 characters; the full plan is linked above. The resource list below is complete.
+> **Plan text truncated**: showing 3,182 of 8,766 characters; the full plan is linked above. The resource list below is complete.
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 40 | 0 | 2 | 0 | 0 | 0 | 0 | 1 | 0 |
 
 **Resources (42)**
-```text
+```diff
 -   terraform_data.item["alpha"]   delete
 -   terraform_data.item["beta"]    delete
 +   terraform_data.item["item01"]  create
@@ -53,7 +53,7 @@
 +   terraform_data.item["item40"]  create
 ```
 
-#### Plan output for truncated (truncated: 3,221 of 8,766 characters)
+<details><summary>Plan output for truncated (truncated: 3,182 of 8,766 characters)</summary>
 
 ```terraform
 
@@ -165,7 +165,8 @@ Terraform will perform the following actions:
     }
 
   # terraform_data.item["item13"] will be created
-  + resource "terraform_data" "item" {
 ```
+
+</details>
 
 Outputs: `item_count` (update)

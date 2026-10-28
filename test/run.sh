@@ -111,9 +111,9 @@ for dir in */; do
 done
 
 # The Azure Repos dialect (TFPR_VCS=azure) on the fixtures that stress the
-# layout: headings instead of <details>, plain fences, no hidden markup (the
-# marker and record are thread properties), the banner still right under the
-# headline, and within Azure's limit.
+# layout: <details> and ```diff like GitHub, no hidden markup (the marker and
+# record are thread properties), the banner still right under the headline,
+# and within Azure's limit.
 for name in truncated large; do
   stack="${name}" budget="" plan_json="${name}/plan.json" plan_txt="${name}/plan.txt"
   [[ -f "${name}/budget" ]] && budget="$(cat "${name}/budget")"
@@ -130,8 +130,8 @@ for name in truncated large; do
     "${tfpr}" render > "${sandbox}/render.md"
   assert_golden "render ${name} (azure)" "render/${name}/expected-azure.md" "${sandbox}/render.md"
   out="$(cat "${sandbox}/render.md")"
-  assert_lacks "${name} (azure): no <details>" "${out}" "<details"
-  assert_lacks "${name} (azure): no diff fence" "${out}" '```diff'
+  assert_has "${name} (azure): <details>" "${out}" "<details"
+  assert_has "${name} (azure): diff fence" "${out}" '```diff'
   assert_lacks "${name} (azure): no hidden markup" "${out}" "<!--"
   if head -n 4 "${sandbox}/render.md" | grep -q '^> \*\*'; then pass; else
     fail "${name} (azure): the banner is not right under the headline and status line"; fi
