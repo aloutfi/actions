@@ -158,10 +158,11 @@ Each host's limits and markdown dialect are one row in `hosts` in
 [core/host.go](../core/host.go):
 
 ```go
-{Name: "github", MaxComment: 65536, MaxSummary: 1 << 20, Details: true, DiffFence: true, HiddenHTML: true},
+{Name: "github", MaxComment: 65536, MaxSummary: 1 << 20, Details: true, DiffFence: true, HiddenHTML: true, SummaryDetails: true},
 ```
 
 `Details: false` turns collapsible blocks into headings, and
 `DiffFence: false` puts the resource list in a plain fence; each line keeps
-its action word. Supporting a new host means adding a row. Names the table
+its action word. `SummaryDetails: false` keeps headings in the job summary
+only. Supporting a new host means adding a row. Names the table
 does not list get the first row.

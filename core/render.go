@@ -206,6 +206,7 @@ func RenderSummary(c PlanComment) (string, error) {
 		l.budget = c.Host.MaxSummary
 	}
 	c.Links.Summary = "" // no link to itself
+	c.Host.Details = c.Host.Details && c.Host.SummaryDetails
 	return render(bind(templates, c.Host), c, l)
 }
 

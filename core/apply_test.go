@@ -97,8 +97,8 @@ func TestApplyReportLog(t *testing.T) {
 		if !strings.Contains(got, "Apply output (last ") {
 			t.Errorf("%s: the title doesn't say the log was cut", host)
 		}
-		if strings.Contains(got, "<details") != (host == "github") {
-			t.Errorf("%s: wrong dialect:\n%.300s", host, got)
+		if !strings.Contains(got, "<details") {
+			t.Errorf("%s: the log is not collapsible:\n%.300s", host, got)
 		}
 	}
 	// A short log is shown whole, open when the apply failed.
