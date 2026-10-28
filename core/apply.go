@@ -19,8 +19,17 @@ type ApplyReport struct {
 	Log              string     // the apply's output, already filtered; "" for none
 	SHA, JobURL      string
 	ToolVersion      string
+	Binary           string // the terraform executable's name; "" is terraform
 	BinaryVersion    string
 	Budget           int // characters for the whole body; 0 = the host's limit
+}
+
+// BinaryName is the executable that applied: Binary, or terraform.
+func (r ApplyReport) BinaryName() string {
+	if r.Binary == "" {
+		return "terraform"
+	}
+	return r.Binary
 }
 
 // Resolved reports whether the result needs nobody's attention: a
@@ -51,7 +60,7 @@ func RenderApplyReport(r ApplyReport) (string, error) {
 	if r.Budget <= 0 {
 		r.Budget = r.Host.MaxComment
 	}
-	v := ApplyView{ApplyReport: r, ToolURL: ReleaseURL(r.ToolVersion), BinaryURL: BinaryReleaseURL("terraform", r.BinaryVersion)}
+	v := ApplyView{ApplyReport: r, ToolURL: ReleaseURL(r.ToolVersion), BinaryURL: BinaryReleaseURL(r.BinaryName(), r.BinaryVersion)}
 	switch {
 	case r.Gate.Action == GateRefuse:
 		v.Icon, v.Status, v.Failed = "🛑", "refused", true

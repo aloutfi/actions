@@ -206,17 +206,22 @@ and the newer run applies. If no newer commit touched the stack, the run
 applies: with `on.push.paths` or per-stack change detection, the newer run
 may never apply this stack at all.
 
-The stack's directory is what counts as the stack. If it uses files outside
-it, such as local modules, list them in `paths` so a change there also
-counts:
+What counts as the stack: its directory, and the local modules it calls
+(`source = "./…"` or `"../…"`, followed through modules that call others).
+List anything else it reads in `paths`, relative to the repository root:
+var files, templates, scripts. `.` makes any change in the repository count.
 
 ```yaml
       - uses: aloutfi/actions/apply@v0.3.0
         with:
           stack: infra/prod
           paths: |
-            infra/modules
+            config/prod.tfvars
 ```
+
+An entry that isn't a plain repo-relative path (absolute, `..`, a glob, a
+backslash) fails the step. If the gate can't read what changed, from git or
+from the repo host, it skips: the old behavior.
 
 On a tag or other non-branch ref, the first attempt applies with a warning
 and re-runs are refused.
@@ -343,8 +348,9 @@ reason.
     # Default: "false"
     allow_fresh_plan_fallback: ""
 
-    # Repo paths outside the stack directory whose changes also supersede an
-    # older commit, such as shared modules. One per line.
+    # Files or directories outside the stack and its local modules whose
+    # changes also supersede an older commit, relative to the repository
+    # root. One per line.
     paths: ""
 
     # Skip when the PR's reviewed plan was a no-op (see gate).

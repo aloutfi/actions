@@ -211,6 +211,7 @@ func TestAzureGateAndReport(t *testing.T) {
 	lacks(t, "report: Azure dialect", content, "<details")
 
 	// A newer head that changed only other stacks: apply.
+	s.gitCommit()
 	ado.diff = `{"allChangesIncluded":true,"changes":[{"item":{"path":"/other"}},{"item":{"path":"/other/main.tf"}}]}`
 	r = s.run("gate")
 	eq(t, "stack unchanged: exit code", 0, r.rc)

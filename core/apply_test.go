@@ -23,6 +23,11 @@ func TestRenderApplyReport(t *testing.T) {
 	}{
 		{"applied", report(GateApply, "", 0), true, []string{"### ✅ Terraform apply · `infra` (`default`) · succeeded", "Commit `abc1234` · [job log](https://ci.example/run/1) · tfpr v0.2.0"}},
 		{"failed", report(GateApply, "", 3), false, []string{"❌ Terraform apply · `infra` (`default`) · failed (exit 3)"}},
+		{"release links", func() ApplyReport {
+			r := report(GateApply, "", 0)
+			r.ToolVersion, r.Binary, r.BinaryVersion = "0.3.0", "tofu", "1.10.0"
+			return r
+		}(), true, []string{" · [tfpr v0.3.0](https://github.com/aloutfi/actions/releases/tag/v0.3.0) · [tofu 1.10.0](https://github.com/opentofu/opentofu/releases/tag/v1.10.0)\n"}},
 		{"superseded", func() ApplyReport {
 			r := report(GateSkip, "superseded", 0)
 			r.SupersededBy = "https://ci.example/run/2"

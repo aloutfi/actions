@@ -201,6 +201,7 @@ func (s *scenario) planArtifactFor(stack, workspace, sha, head string) {
 }
 
 func (s *scenario) write(name, content string) {
+	must(s.t, os.MkdirAll(filepath.Dir(filepath.Join(s.ws, name)), 0o755))
 	must(s.t, os.WriteFile(filepath.Join(s.ws, name), []byte(content), 0o644))
 }
 
@@ -602,6 +603,7 @@ func TestApplySupersededGuard(t *testing.T) {
 	// A newer head that did not change the stack does not supersede: under
 	// path filters its run may never apply this stack.
 	s = newScenario(t)
+	s.gitCommit()
 	s.gh.branchHead, s.gh.compare = "def", `{"status":"ahead","files":[{"filename":"other/main.tf"},{"filename":"stack2/x.tf"}]}`
 	r = s.run("apply")
 	eq(t, "stack unchanged: exit code", 0, r.rc)
@@ -609,8 +611,35 @@ func TestApplySupersededGuard(t *testing.T) {
 	has(t, "stack unchanged: says so", r.out, "abc is no longer the head of 'main' (now def), but nothing in the stack changed since")
 	has(t, "stack unchanged: applies", r.tf, "-auto-approve")
 
+	// Outside a git repository the stack can't be placed: skip.
+	s = newScenario(t)
+	s.gh.branchHead, s.gh.compare = "def", `{"status":"ahead","files":[{"filename":"other/main.tf"}]}`
+	r = s.run("apply")
+	eq(t, "no git: clean skip", 0, r.rc)
+	has(t, "no git: says so", r.out, "tfpr could not tell whether the stack changed since")
+	lacks(t, "no git: no apply", r.tf, "terraform apply")
+
+	// Local modules the stack calls count as the stack.
+	s = newScenario(t)
+	s.write("modules/net/main.tf", "module \"leaf\" {\n  source = \"../leaf\"\n}\n")
+	s.write("modules/leaf/main.tf", "# leaf\n")
+	s.gitCommit()
+	s.write("stack/mods.tf", "module \"net\" {\n  source  = \"../modules/net\"\n}\nmodule \"reg\" {\n  source = \"hashicorp/consul/aws\"\n}\n")
+	s.gh.branchHead, s.gh.compare = "def", `{"status":"ahead","files":[{"filename":"modules/leaf/main.tf"}]}`
+	r = s.run("apply")
+	eq(t, "local module changed: clean skip", 0, r.rc)
+	has(t, "local module changed: names it", r.out, "the stack changed since (modules/leaf/main.tf)")
+	lacks(t, "local module changed: no apply", r.tf, "terraform apply")
+
+	// A TFPR_PATHS entry that can't mean a repo path fails, before anything runs.
+	r = newScenario(t).set("TFPR_PATHS", "modules/**").run("apply")
+	eq(t, "bad TFPR_PATHS: exit code", 1, r.rc)
+	has(t, "bad TFPR_PATHS: says so", r.out, "TFPR_PATHS entry 'modules/**'")
+	lacks(t, "bad TFPR_PATHS: no apply", r.tf, "terraform apply")
+
 	// TFPR_PATHS adds paths the stack depends on.
 	s = newScenario(t).set("TFPR_PATHS", "modules/net\nother")
+	s.gitCommit()
 	s.gh.branchHead, s.gh.compare = "def", `{"status":"ahead","files":[{"filename":"modules/net/vpc.tf"}]}`
 	r = s.run("apply")
 	eq(t, "shared module changed: clean skip", 0, r.rc)
@@ -1116,7 +1145,7 @@ func (f *fakeAzureRepos) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/refs"):
 		fmt.Fprintf(w, `{"value":[{"name":"refs/heads/main","objectId":%q}]}`, cmp.Or(f.head, "squash1"))
 	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/diffs/commits":
-		if q := r.URL.Query(); q.Get("baseVersion") != "squash1" || q.Get("targetVersion") != cmp.Or(f.head, "squash1") {
+		if q := r.URL.Query(); q.Get("baseVersion") != "squash1" || q.Get("targetVersion") != cmp.Or(f.head, "squash1") || q.Get("diffCommonCommit") != "false" {
 			http.Error(w, `{"message":"unexpected versions"}`, http.StatusBadRequest)
 			return
 		}

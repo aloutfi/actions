@@ -196,9 +196,8 @@ func TestTouching(t *testing.T) {
 		want  string
 	}{
 		{[]string{"infra"}, "infra/main.tf"},
-		{[]string{"./infra/"}, "infra/main.tf"},
 		{[]string{"infra2"}, "infra2/x.tf"},
-		{[]string{"infra", " modules "}, "infra/main.tf modules/net/vpc.tf"},
+		{[]string{"infra", "modules"}, "infra/main.tf modules/net/vpc.tf"},
 		{[]string{"modules/net/vpc.tf"}, "modules/net/vpc.tf"},
 		{[]string{"other"}, ""},
 		{[]string{""}, "infra/main.tf infra2/x.tf modules/net/vpc.tf README.md"},
@@ -206,6 +205,18 @@ func TestTouching(t *testing.T) {
 	} {
 		if got := strings.Join(Touching(files, c.paths), " "); got != c.want {
 			t.Errorf("Touching(%q): got %q, want %q", c.paths, got, c.want)
+		}
+	}
+}
+
+func TestParsePaths(t *testing.T) {
+	got, err := ParsePaths(" modules/net/ ,\n./shared//vars\n\n.")
+	if err != nil || strings.Join(got, " ") != "modules/net shared/vars ." {
+		t.Errorf("got %q, %v", got, err)
+	}
+	for _, bad := range []string{"/abs/modules", "../modules", "a/../../b", `infra\modules`, "modules/**", "modules/*", "C:/repo/modules", "mod?"} {
+		if _, err := ParsePaths("ok\n" + bad); err == nil {
+			t.Errorf("%q: want an error", bad)
 		}
 	}
 }

@@ -316,28 +316,37 @@ func (z *Azure) BranchHead(branch string) (string, error) {
 const adoDiffPage, adoDiffMax = 1000, 20000
 
 // ChangedFiles lists the files changed from base to head with the commit
-// diffs API, a page at a time.
+// diffs API, a page at a time. A base the head is not a descendant of
+// (behindCount above 0, as after a force-push) is an error.
 func (z *Azure) ChangedFiles(base, head string) ([]string, error) {
 	var files []string
 	for skip := 0; ; {
 		var d struct {
 			AllChangesIncluded bool `json:"allChangesIncluded"`
+			BehindCount        int  `json:"behindCount"`
 			Changes            []struct {
 				Item struct {
-					Path string `json:"path"`
+					Path         string `json:"path"`
+					OriginalPath string `json:"originalPath"` // a rename's old path
 				} `json:"item"`
-				SourceServerItem string `json:"sourceServerItem"` // a rename's old path
+				SourceServerItem string `json:"sourceServerItem"`
 			} `json:"changes"`
 		}
-		p := z.path("/diffs/commits?baseVersionType=commit&baseVersion=%s&targetVersionType=commit&targetVersion=%s&$top=%d&$skip=%d",
+		// diffCommonCommit=false: the trees of base and head themselves, not
+		// head against a merge base, which hides what a force-push dropped.
+		p := z.path("/diffs/commits?baseVersionType=commit&baseVersion=%s&targetVersionType=commit&targetVersion=%s&diffCommonCommit=false&$top=%d&$skip=%d",
 			url.QueryEscape(base), url.QueryEscape(head), adoDiffPage, skip)
 		if _, err := z.api.Do(http.MethodGet, p, nil, &d); err != nil {
 			return nil, err
 		}
+		if d.BehindCount > 0 {
+			return nil, fmt.Errorf("%s is not an ancestor of %s (%d commits behind)", base, head, d.BehindCount)
+		}
 		for _, c := range d.Changes {
-			files = append(files, strings.TrimPrefix(c.Item.Path, "/"))
-			if c.SourceServerItem != "" {
-				files = append(files, strings.TrimPrefix(c.SourceServerItem, "/"))
+			for _, p := range []string{c.Item.Path, c.Item.OriginalPath, c.SourceServerItem} {
+				if p != "" {
+					files = append(files, strings.TrimPrefix(p, "/"))
+				}
 			}
 		}
 		if d.AllChangesIncluded || len(d.Changes) == 0 {

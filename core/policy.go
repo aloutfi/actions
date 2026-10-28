@@ -149,15 +149,38 @@ func SupersededGuard(ref, sha string, attempt int, branchHead func(branch string
 		attempt, sha, branch, head, why, head), head}
 }
 
+// ParsePaths reads TFPR_PATHS: repo-relative paths separated by newlines
+// or commas. An entry that is absolute, leaves the repository, uses
+// backslashes or looks like a glob is an error, not a guess: a path that
+// matches nothing would let an older tree roll back newer changes.
+func ParsePaths(s string) ([]string, error) {
+	var paths []string
+	for _, p := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == ',' }) {
+		p = strings.TrimSpace(p)
+		switch {
+		case p == "":
+			continue
+		case strings.HasPrefix(p, "/") || strings.Contains(p, ":") || strings.ContainsAny(p, "\\*?["):
+			return nil, fmt.Errorf("TFPR_PATHS entry '%s': want a plain path relative to the repository root, no globs or backslashes", p)
+		}
+		p = path.Clean(p)
+		if p == ".." || strings.HasPrefix(p, "../") {
+			return nil, fmt.Errorf("TFPR_PATHS entry '%s' is outside the repository", p)
+		}
+		paths = append(paths, p)
+	}
+	return paths, nil
+}
+
 // Touching returns the files (repo-relative, slash-separated) at or under
-// any of paths. A path of "" or "." is the whole repository.
+// any of paths (clean, repo-relative). A path of "" or "." is the whole
+// repository.
 func Touching(files, paths []string) []string {
 	var out []string
 	for _, f := range files {
 		f = strings.TrimPrefix(f, "/")
 		for _, p := range paths {
-			p = path.Clean("/" + strings.TrimSpace(p))[1:]
-			if p == "" || f == p || strings.HasPrefix(f, p+"/") {
+			if p == "" || p == "." || f == p || strings.HasPrefix(f, p+"/") {
 				out = append(out, f)
 				break
 			}

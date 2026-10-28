@@ -2,7 +2,7 @@
 The apply-result comment. It gets an ApplyView (see core/apply.go).
 */ -}}
 ### {{.Icon}} Terraform apply · {{code .Stack}} ({{code .Workspace}}) · {{.Status}}
-Commit {{code (short .SHA)}}{{with .JobURL}} · [job log]({{.}}){{end}} · {{with .ToolURL}}[tfpr v{{$.ToolVersion}}]({{.}}){{else}}tfpr {{or .ToolVersion "dev"}}{{end}}{{with .BinaryVersion}} · {{with $.BinaryURL}}[terraform {{$.BinaryVersion}}]({{.}}){{else}}terraform {{.}}{{end}}{{end}}
+Commit {{code (short .SHA)}}{{with .JobURL}} · [job log]({{.}}){{end}} · {{with .ToolURL}}[tfpr v{{$.ToolVersion}}]({{.}}){{else}}tfpr {{or .ToolVersion "dev"}}{{end}}{{with .BinaryVersion}} · {{with $.BinaryURL}}[{{$.BinaryName}} {{$.BinaryVersion}}]({{.}}){{else}}{{$.BinaryName}} {{.}}{{end}}{{end}}
 {{if eq .Gate.Reason "superseded"}}
 > **Superseded by {{code (short .Gate.BranchHead)}}**; that commit's run applies these changes{{with .SupersededBy}} ([link]({{.}})){{end}}.
 {{else if .Incomplete}}

@@ -19,10 +19,11 @@ inputs:
     default: "default"
   paths:
     description: >-
-      Repo paths besides the stack directory whose changes make an older
-      commit superseded, such as shared modules the stack uses; one per line.
-      A commit that is no longer its branch's head still applies when nothing
-      under the stack or these paths changed since.
+      Paths outside the stack directory and its local modules whose changes
+      make an older commit superseded (var files, scripts), relative to the
+      repository root; one per line. A commit that is no longer its branch's
+      head still applies when nothing under the stack, its local modules or
+      these paths changed since.
     required: false
     default: ""
   skip_noop:

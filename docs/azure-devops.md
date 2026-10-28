@@ -136,9 +136,10 @@ only before and after it, with only the access token:
   applies the newer tree, which includes this commit's changes. If nothing
   under the stack changed since, the commit's stack is the head's and it
   applies; a newer run that skips unchanged stacks would otherwise never
-  apply it. `TFPR_PATHS` adds paths the stack depends on, such as shared
-  modules (repo-relative, one per line). If tfpr can't verify the branch
-  head, the step fails; if it can't read the diff, it skips.
+  apply it. The stack includes the local modules it calls; `TFPR_PATHS`
+  adds other paths it reads (repo-relative, one per line). If tfpr can't
+  verify the branch head, the step fails; if it can't read the diff, it
+  skips.
   Opt-in `TFPR_SKIP_NOOP=true` also skips when the merged PR's reviewed plan
   was a no-op and the merged tree is the tree that was planned; any doubt
   applies.

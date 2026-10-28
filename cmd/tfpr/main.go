@@ -609,6 +609,9 @@ func (a *app) reviewedPlanfile(g core.GateResult) bool {
 // itself otherwise. A superseded commit is a clean skip.
 func (a *app) apply() error {
 	a.loadCI()
+	if _, err := core.ParsePaths(os.Getenv("TFPR_PATHS")); err != nil {
+		return err
+	}
 	v, err := a.loadVCS()
 	if err != nil {
 		return err
@@ -620,7 +623,7 @@ func (a *app) apply() error {
 			a.ci.Log(ci.Warning, "Could not write decision.json: "+err.Error())
 		}
 	}
-	r := core.ApplyReport{Gate: g, PlanRun: g.PlanRun}
+	r := core.ApplyReport{Gate: g, PlanRun: g.PlanRun, Binary: filepath.Base(a.tfBin)}
 	code, reason := 0, g.Reason
 	switch g.Action {
 	case core.GateRefuse:

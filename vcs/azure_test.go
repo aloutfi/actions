@@ -113,6 +113,9 @@ func (f *fakeADO) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(p, "/pullrequests/"):
 		reply(f.prs[p[strings.LastIndex(p, "/")+1:]])
 	case strings.HasSuffix(p, "/diffs/commits"):
+		if r.URL.Query().Get("diffCommonCommit") != "false" {
+			f.t.Errorf("diff without diffCommonCommit=false: %s", r.URL)
+		}
 		if len(f.diffs) == 0 {
 			http.NotFound(w, r)
 			return
@@ -377,11 +380,11 @@ func TestAzureBranchHead(t *testing.T) {
 
 func TestAzureChangedFiles(t *testing.T) {
 	change := func(p, from string) map[string]any {
-		c := map[string]any{"item": map[string]any{"path": p}}
+		item := map[string]any{"path": p}
 		if from != "" {
-			c["sourceServerItem"] = from
+			item["originalPath"] = from
 		}
-		return c
+		return map[string]any{"item": item}
 	}
 	f := &fakeADO{diffs: []map[string]any{
 		{"allChangesIncluded": false, "changes": []any{change("/infra/a.tf", "")}},
@@ -397,6 +400,10 @@ func TestAzureChangedFiles(t *testing.T) {
 	}
 	if _, err := newADO(t, &fakeADO{}, false).ChangedFiles("abc", "def"); err == nil {
 		t.Error("want an error when the diff can't be read")
+	}
+	behind := &fakeADO{diffs: []map[string]any{{"behindCount": 1, "changes": []any{change("/docs/x.md", "")}}}}
+	if _, err := newADO(t, behind, false).ChangedFiles("abc", "def"); err == nil {
+		t.Error("want an error when base is not an ancestor of head")
 	}
 }
 
