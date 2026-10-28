@@ -46,8 +46,9 @@ actions are thin wrappers around it.
 
 > [!IMPORTANT]
 >
-> *   **Pin a release** (`@v0.3.0`) or its commit SHA. A release ref downloads
->     a prebuilt `tfpr` checked against the checksums committed at that ref.
+> *   **Pin a release**: `@v1`, `@v1.0`, `@v1.0.0` or a commit SHA. A release
+>     ref downloads a prebuilt `tfpr` checked against the checksums committed
+>     at that ref.
 >     Any other ref (`@main`, a branch) builds `tfpr` from source on every run
 >     and puts Go on the job's `PATH`.
 > *   **Provider credentials go in job-level `env:`.** Composite actions
@@ -79,7 +80,7 @@ jobs:
       EXAMPLE_PROVIDER_TOKEN: ${{ secrets.EXAMPLE_PROVIDER_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - uses: aloutfi/actions/plan@v0.3.0
+      - uses: aloutfi/actions/plan@v1
         with:
           stack: infra/
           workspace: prod
@@ -111,7 +112,7 @@ jobs:
       EXAMPLE_PROVIDER_TOKEN: ${{ secrets.EXAMPLE_PROVIDER_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - uses: aloutfi/actions/apply@v0.3.0
+      - uses: aloutfi/actions/apply@v1
         with:
           stack: infra/
           workspace: prod
@@ -144,7 +145,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - id: gate
-        uses: aloutfi/actions/gate@v0.3.0
+        uses: aloutfi/actions/gate@v1
         with:
           stack: infra/
           workspace: prod
@@ -190,7 +191,7 @@ re-run when the reviewed planfile is missing, set
 `allow_fresh_plan_fallback: "true"`:
 
 ```yaml
-      - uses: aloutfi/actions/apply@v0.3.0
+      - uses: aloutfi/actions/apply@v1
         with:
           stack: infra/
           use_planfile: "true"
@@ -212,7 +213,7 @@ List anything else it reads in `paths`, relative to the repository root:
 var files, templates, scripts. `.` makes any change in the repository count.
 
 ```yaml
-      - uses: aloutfi/actions/apply@v0.3.0
+      - uses: aloutfi/actions/apply@v1
         with:
           stack: infra/prod
           paths: |
@@ -245,7 +246,7 @@ jobs:
       EXAMPLE_PROVIDER_TOKEN: ${{ secrets.EXAMPLE_PROVIDER_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - uses: aloutfi/actions/plan@v0.3.0
+      - uses: aloutfi/actions/plan@v1
         with:
           stack: ${{ matrix.stack }}
           mode: drift
@@ -271,7 +272,7 @@ reason.
 ### plan
 
 ```yaml
-- uses: aloutfi/actions/plan@v0.3.0
+- uses: aloutfi/actions/plan@v1
   with:
     # Terraform working directory. Cleaned before use, so `infra/`,
     # `./infra` and `infra` are the same stack everywhere.
@@ -331,7 +332,7 @@ reason.
 ### apply
 
 ```yaml
-- uses: aloutfi/actions/apply@v0.3.0
+- uses: aloutfi/actions/apply@v1
   with:
     # Same as plan.
     stack: ""
@@ -373,7 +374,7 @@ The decision of `apply` alone, with only the GitHub token. It writes
 (`tfpr/decision@1`; see [docs/azure-devops.md](docs/azure-devops.md)).
 
 ```yaml
-- uses: aloutfi/actions/gate@v0.3.0
+- uses: aloutfi/actions/gate@v1
   with:
     # Same as apply.
     stack: ""
@@ -391,7 +392,7 @@ Run it with `if: ${{ !cancelled() }}`. If a gate in the same job skipped or
 refused the apply, it reports that and needs no exit code.
 
 ```yaml
-- uses: aloutfi/actions/report@v0.3.0
+- uses: aloutfi/actions/report@v1
   if: ${{ !cancelled() }}
   with:
     # Same as plan.
@@ -449,7 +450,7 @@ refused the apply, it reports that and needs no exit code.
 
 ```markdown
 ### ⚠️ Terraform plan · `infra` (`prod`) · 3,000 to add, 40 to change, 25 to destroy, 5 to replace
-Commit `7c79a8b` · [job log](…) · [full plan](…) · [plan.txt](…) · [tfpr v0.3.0](…) · [terraform 1.17.1](…) · redaction: none
+Commit `7c79a8b` · [job log](…) · [full plan](…) · [plan.txt](…) · [tfpr v1.0.0](…) · [terraform 1.17.1](…) · redaction: none
 
 > **Plan text truncated**: showing 42,748 of 600,946 characters; the full plan is linked above.
 > **Resource list shortened**: every delete, replace and forget is listed; 2,556 lower-risk lines are counted, not listed.
@@ -487,10 +488,20 @@ and every one must render the same comments.
 
 ## Versioning 🏷️
 
-Releases follow [Semantic Versioning](https://semver.org). Before 1.0, a minor
-release may change inputs, outputs or the comment; the release notes say
-how. Each release tag carries `checksums.txt` for its binaries, so pinning a
-tag or its commit SHA pins the `tfpr` that runs.
+Releases follow [Semantic Versioning](https://semver.org): a breaking change to
+inputs, outputs, the comment or `decision.json` is a new major version. Pin
+the depth you want:
+
+| Pin | Moves to | Example |
+|---|---|---|
+| `@v1` | every 1.x release: fixes and features | `aloutfi/actions/plan@v1` |
+| `@v1.0` | every 1.0.x release: fixes only | `aloutfi/actions/plan@v1.0` |
+| `@v1.0.0` or a commit SHA | nothing | `aloutfi/actions/plan@v1.0.0` |
+
+Each release commit carries `checksums.txt` for its binaries, so whatever the
+ref resolves to pins the `tfpr` that runs. A release is cut by changing
+`VERSION` on `main`; the release workflow tags `v<version>` and moves
+`v<major>` and `v<major>.<minor>` to it (prereleases move neither).
 
 How the actions get `tfpr`, first match wins:
 
@@ -519,7 +530,7 @@ jobs:
           - { stack: infra/app, workspace: prod }
     steps:
       - uses: actions/checkout@v6
-      - uses: aloutfi/actions/plan@v0.3.0
+      - uses: aloutfi/actions/plan@v1
         with:
           stack: ${{ matrix.stack }}
           workspace: ${{ matrix.workspace }}
@@ -540,7 +551,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - id: gate
-        uses: aloutfi/actions/gate@v0.3.0
+        uses: aloutfi/actions/gate@v1
         with: { stack: infra/, skip_noop: "true" }
 
       - id: apply
@@ -552,7 +563,7 @@ jobs:
           echo "exit_code=${code}" >> "${GITHUB_OUTPUT}"
           exit "${code}"
 
-      - uses: aloutfi/actions/report@v0.3.0
+      - uses: aloutfi/actions/report@v1
         if: ${{ !cancelled() }}
         with:
           stack: infra/
@@ -571,7 +582,7 @@ jobs:
         with:
           client-id: ${{ vars.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-      - uses: aloutfi/actions/plan@v0.3.0
+      - uses: aloutfi/actions/plan@v1
         with:
           stack: infra/
           token: ${{ steps.app.outputs.token }}
@@ -589,7 +600,7 @@ jobs:
       - run: echo "GITHUB_TOKEN=${APP_TOKEN}" >> "${GITHUB_ENV}"
         env:
           APP_TOKEN: ${{ steps.app.outputs.token }}
-      - uses: aloutfi/actions/plan@v0.3.0
+      - uses: aloutfi/actions/plan@v1
         with:
           stack: infra/github
 ```
@@ -603,7 +614,7 @@ jobs:
       - uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.MODULES_DEPLOY_KEY }}
-      - uses: aloutfi/actions/plan@v0.3.0
+      - uses: aloutfi/actions/plan@v1
         with:
           stack: infra/
 ```
@@ -624,7 +635,7 @@ Owners: @infra-team · [Runbook](https://example.invalid/runbook)
 ```
 
 ```yaml
-      - uses: aloutfi/actions/plan@v0.3.0
+      - uses: aloutfi/actions/plan@v1
         with:
           stack: infra/
           template: .github/tfpr-comment.tmpl
@@ -642,7 +653,7 @@ Owners: @infra-team · [Runbook](https://example.invalid/runbook)
         -e 's/(password *= *).*/\1[redacted]/'
     steps:
       - uses: actions/checkout@v6
-      - uses: aloutfi/actions/plan@v0.3.0
+      - uses: aloutfi/actions/plan@v1
         with:
           stack: infra/
 ```
@@ -666,7 +677,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - id: plan
-        uses: aloutfi/actions/plan@v0.3.0
+        uses: aloutfi/actions/plan@v1
         with: { stack: "${{ matrix.stack }}", mode: drift }
       - if: steps.plan.outputs.drifted == 'true'
         env: { STACK: "${{ matrix.stack }}" }
