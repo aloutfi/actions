@@ -2,13 +2,14 @@
 The apply-result comment. It gets an ApplyView (see core/apply.go).
 */ -}}
 ### {{.Icon}} Terraform apply · {{code .Stack}} ({{code .Workspace}}) · {{.Status}}
-{{if eq .Gate.Reason "superseded" -}}
+Commit {{code (short .SHA)}}{{with .JobURL}} · [job log]({{.}}){{end}} · {{with .ToolURL}}[tfpr v{{$.ToolVersion}}]({{.}}){{else}}tfpr {{or .ToolVersion "dev"}}{{end}}{{with .BinaryVersion}} · {{with $.BinaryURL}}[terraform {{$.BinaryVersion}}]({{.}}){{else}}terraform {{.}}{{end}}{{end}}
+{{if eq .Gate.Reason "superseded"}}
 > **Superseded by {{code (short .Gate.BranchHead)}}**; that commit's run applies these changes{{with .SupersededBy}} ([link]({{.}})){{end}}.
-{{else if .Incomplete -}}
+{{else if .Incomplete}}
 > **Apply did not complete** (no exit code; the apply step may have failed before it started or been cancelled), see {{with .JobURL}}[the run]({{.}}){{else}}the CI log{{end}}.
-{{else if eq .Gate.Action "refuse" -}}
+{{else if eq .Gate.Action "refuse"}}
 > **Apply refused**: {{.Explain}}
-{{else if eq .Gate.Reason "no-op" -}}
+{{else if eq .Gate.Reason "no-op"}}
 > **Apply skipped**: the reviewed plan had no changes, and the merged tree is the tree that was planned.
 {{end -}}
 {{with .SourceLine}}
@@ -17,4 +18,3 @@ Source: {{.}}
 {{if .Log}}
 {{details .Failed .LogTitle (fence "text" .Log)}}
 {{end}}
-Commit {{code (short .SHA)}}{{with .JobURL}} · [job log]({{.}}){{end}}{{with .BinaryVersion}} · terraform {{.}}{{end}} · tfpr {{or .ToolVersion "dev"}}

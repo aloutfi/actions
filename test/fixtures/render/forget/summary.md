@@ -1,6 +1,7 @@
 ### 🔀 Terraform plan · `forget` (`default`) · No infrastructure changes; state-only: 1 forgotten
+[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
+
 > **1 resource will be forgotten**: removed from state, not destroyed; it keeps running, unmanaged.
-> Redaction: no redaction filter configured
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -31,5 +32,3 @@ Plan: 0 to add, 0 to change, 0 to destroy.
 ```
 
 </details>
-
-tfpr dev · redaction: none

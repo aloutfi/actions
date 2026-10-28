@@ -949,7 +949,7 @@ func TestRenderOutputIsTheBody(t *testing.T) {
 	eq(t, "derive", 0, s.set("TFPR_PLAN_JSON", fixture, "TFPR_PLAN_TXT", "plan.txt").run("derive").rc)
 	r := s.run("render")
 	eq(t, "exit code", 0, r.rc)
-	if !strings.HasPrefix(r.out, "<!-- tf-plan:stack :: default -->\n") || !strings.HasSuffix(r.out, "redaction: none\n") {
+	if !strings.HasPrefix(r.out, "<!-- tf-plan:stack :: default -->\n") || !strings.HasSuffix(r.out, "</details>\n") {
 		t.Errorf("render output is not just the body:\n%s", r.out)
 	}
 	lacks(t, "no markers", r.out, "stop-commands")
@@ -1263,7 +1263,7 @@ func TestCommentBudget(t *testing.T) {
 	if n := utf8.RuneCountInString(r.body); n > 3000 {
 		t.Errorf("comment is %d characters, over 3,000", n)
 	}
-	has(t, "banner", strings.Join(strings.SplitN(r.body, "\n", 6)[:5], "\n"), "> **Plan text truncated**")
+	has(t, "banner", strings.Join(strings.SplitN(r.body, "\n", 7)[:6], "\n"), "> **Plan text truncated**")
 	eq(t, "bad budget", 1, s.set("TFPR_COMMENT_BUDGET", "lots").run("comment").rc)
 }
 
@@ -1280,8 +1280,8 @@ func TestFilterThatLengthensFallsBack(t *testing.T) {
 	has(t, "minimal layout", r.body, "> **Comment shortened**")
 }
 
-// TFPR_TEMPLATE replaces named blocks; the example in the docs overrides
-// only the footer.
+// TFPR_TEMPLATE replaces named blocks; the example in the docs fills in
+// the footer, which is empty by default.
 func TestTemplateOverride(t *testing.T) {
 	s := newScenario(t)
 	s.write("footer.tmpl", "{{define \"footer\"}}\nOwners: @infra-team · [Runbook](https://example.invalid/runbook)\n{{end}}\n")

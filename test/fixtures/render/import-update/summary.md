@@ -1,4 +1,5 @@
 ### 📝 Terraform plan · `import-update` (`default`) · 0 to add, 1 to change, 0 to destroy, 1 to import
+[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -31,5 +32,3 @@ Plan: 1 to import, 0 to add, 1 to change, 0 to destroy.
 ```
 
 </details>
-
-tfpr dev · redaction: none

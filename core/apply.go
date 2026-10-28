@@ -40,6 +40,7 @@ type ApplyView struct {
 	ApplyReport
 	Icon, Status, Explain, SourceLine, LogTitle string
 	Failed                                      bool
+	ToolURL, BinaryURL                          string // release pages; "" for none
 }
 
 // RenderApplyReport renders the human-readable part of the apply-result
@@ -50,7 +51,7 @@ func RenderApplyReport(r ApplyReport) (string, error) {
 	if r.Budget <= 0 {
 		r.Budget = r.Host.MaxComment
 	}
-	v := ApplyView{ApplyReport: r}
+	v := ApplyView{ApplyReport: r, ToolURL: ReleaseURL(r.ToolVersion), BinaryURL: BinaryReleaseURL("terraform", r.BinaryVersion)}
 	switch {
 	case r.Gate.Action == GateRefuse:
 		v.Icon, v.Status, v.Failed = "🛑", "refused", true

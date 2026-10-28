@@ -5,7 +5,7 @@ TFPR_TEMPLATE names. A top-level body in that file replaces this whole
 document instead. Blocks get a PlanView, except "unit", "resources" and
 "body", which get a UnitView (see core/render.go).
 */ -}}
-{{template "header" .}}{{template "banner" .}}
+{{template "header" .}}{{template "status" .}}{{template "banner" .}}
 {{- if eq .Status "error"}}{{template "failed" .}}{{end -}}
 {{- /* A failed plain-terraform plan has nothing else to show. Units that did plan are shown as usual. */ -}}
 {{- if or (ne .Status "error") .Multi}}{{template "counts" .}}{{range .Units}}{{template "unit" .}}{{end}}{{template "outputs" .}}{{end -}}
@@ -15,23 +15,26 @@ document instead. Blocks get a PlanView, except "unit", "resources" and
 ### {{.Icon}} Terraform plan · {{code .Result.Target.Stack}} ({{code .Result.Target.Workspace}}) · {{.Headline}}
 {{end}}
 
-{{- define "banner"}}{{with .Banner}}{{if .Show -}}
+{{- /* The status line: what was planned, where to read all of it, and with what. */ -}}
+{{- define "status" -}}
+{{with .Result.Source}}{{if and .HeadSHA (ne .HeadSHA .SHA)}}Commit {{code (short .HeadSHA)}} (planned as merge {{code (short .SHA)}}) · {{else if .SHA}}Commit {{code (short .SHA)}} · {{end}}{{end -}}
+{{with .Links.Job}}[job log]({{.}}) · {{end}}{{with .Links.Summary}}[full plan]({{.}}) · {{end}}{{with .Links.PlanText}}[plan.txt]({{.}}) · {{end -}}
+{{with .Result.Tool}}{{with .ReleaseURL}}[tfpr v{{$.Result.Tool.Version}}]({{.}}){{else}}tfpr {{or .Version "dev"}}{{end}}{{with .BinaryVersion}} · {{with $.Result.Tool.BinaryReleaseURL}}[{{$.Result.Tool.Binary}} {{$.Result.Tool.BinaryVersion}}]({{.}}){{else}}{{$.Result.Tool.Binary}} {{.}}{{end}}{{end}}{{end}} · redaction: {{or .Result.Redaction.Mode "none"}}
+{{end}}
+
+{{- define "banner"}}{{with .Banner}}{{if .Show}}
 {{if .Fallback}}> **Comment shortened**: the full layout does not fit here. Read the resource list and plan text in the full plan.
 {{end -}}
-{{if .Truncated}}> **Plan text truncated**: {{if .Shown}}showing {{.Shown}} of {{.Total}} {{.Measure}}{{else}}none of its {{.Total}} {{.Measure}} fit here{{end}}{{if gt .TruncatedUnits 1}} across {{.TruncatedUnits}} units{{end}}.{{if .ListComplete}} The resource list below is complete.{{end}}
+{{if .Truncated}}> **Plan text truncated**: showing {{if .Shown}}{{.Shown}} of {{.Total}} {{.Measure}}{{else}}none of its {{.Total}} {{.Measure}}{{end}}{{if gt .TruncatedUnits 1}} across {{.TruncatedUnits}} units{{end}}{{if $.Links.Any}}; the full plan is linked above{{end}}.{{if .ListComplete}} The resource list below is complete.{{end}}
 {{end -}}
 {{if .RiskUnlisted}}> **{{plural .RiskUnlisted "delete, replace or forget line"}} did not fit here.** Read them in the full plan before approving.
 {{else if not .ListComplete}}> **Resource list shortened**: every delete, replace and forget is listed; {{plural .Unlisted "lower-risk line"}} {{if eq .Unlisted 1}}is{{else}}are{{end}} counted, not listed.
 {{end -}}
-{{if or .Fallback .Truncated (not .ListComplete)}}{{template "links" $}}{{end -}}
+{{if and (or .Fallback .Truncated (not .ListComplete)) (not $.Links.Any)}}> The full plan is in the CI log of the run that planned it.
+{{end -}}
 {{if .Forget}}> **{{plural .Forget "resource"}} will be forgotten**: removed from state, not destroyed; {{if eq .Forget 1}}it keeps{{else}}they keep{{end}} running, unmanaged.
 {{end -}}
-> Redaction: {{if eq .Redaction "filter"}}filter applied{{else}}no redaction filter configured{{end}}
 {{end}}{{end}}{{end}}
-
-{{- define "links"}}{{with .Links -}}
-> Full plan:{{if or .Summary .PlanText .Job}}{{with .Summary}} [job summary]({{.}}){{end}}{{if and .Summary .PlanText}} ·{{end}}{{with .PlanText}} [plan.txt]({{.}}){{end}}{{if and (or .Summary .PlanText) .Job}} ·{{end}}{{with .Job}} [job log]({{.}}){{end}}{{else}} the CI log of the run that planned it{{end}}
-{{end}}{{end}}
 
 {{- define "failed"}}
 **Plan failed.** Any earlier plan for {{code .Result.Target.Stack}} is out of date; see {{with .Links.Job}}the [job log]({{.}}){{else}}the CI log{{end}}.
@@ -71,8 +74,7 @@ Plan text for {{code .Label}} does not fit here; see the full plan.
 Outputs: {{range $i, $o := .}}{{if $i}}, {{end}}{{code $o.Name}} ({{$o.Action}}{{if $o.Sensitive}}, sensitive{{end}}){{end}}{{with $.MoreOutputs}}, and {{.}} more{{end}}
 {{end}}{{end}}
 
-{{- define "footer"}}
-{{with .Result.Source}}{{if and .HeadSHA (ne .HeadSHA .SHA)}}Commit {{code (short .HeadSHA)}} (planned as merge {{code (short .SHA)}}) · {{else if .SHA}}Commit {{code (short .SHA)}} · {{end}}{{end}}{{with .Links.Job}}[job log]({{.}}) · {{end}}{{with .Links.Summary}}[full plan]({{.}}) · {{end}}tfpr {{or .Result.Tool.Version "dev"}}{{with .Result.Tool.BinaryVersion}} · {{$.Result.Tool.Binary}} {{.}}{{end}} · redaction: {{or .Result.Redaction.Mode "none"}}
-{{end}}
+{{- /* Empty: a place for a user template to add lines at the end. */ -}}
+{{- define "footer"}}{{end}}
 
-{{- define "minimal"}}{{template "header" .}}{{template "banner" .}}{{if eq .Status "error"}}{{template "failed" .}}{{else}}{{template "counts" .}}{{end}}{{template "footer" .}}{{end -}}
+{{- define "minimal"}}{{template "header" .}}{{template "status" .}}{{template "banner" .}}{{if eq .Status "error"}}{{template "failed" .}}{{else}}{{template "counts" .}}{{end}}{{template "footer" .}}{{end -}}

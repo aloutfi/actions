@@ -1,8 +1,8 @@
 ### ⚠️ Terraform plan · `large` (`default`) · 3,000 to add, 40 to change, 25 to destroy, 5 to replace
-> **Plan text truncated**: showing 92,618 of 600,946 characters.
+[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
+
+> **Plan text truncated**: showing 92,735 of 600,946 characters; the full plan is linked above.
 > **Resource list shortened**: every delete, replace and forget is listed; 1,965 lower-risk lines are counted, not listed.
-> Full plan: [job summary](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · [job log](https://ci.example/run/1234/job/5678)
-> Redaction: no redaction filter configured
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -1118,7 +1118,7 @@
 ```
 + 1,965 more `create` lines
 
-#### Plan output for large (truncated: 92,618 of 600,946 characters)
+#### Plan output for large (truncated: 92,735 of 600,946 characters)
 
 ```terraform
 
@@ -4487,8 +4487,11 @@ Terraform will perform the following actions:
   # terraform_data.bulk[479] will be created
   + resource "terraform_data" "bulk" {
       + id     = (known after apply)
+      + input  = "bulk-479"
+      + output = (known after apply)
+    }
+
+  # terraform_data.bulk[480] will be created
 ```
 
 Outputs: `bulk_count` (update)
-
-[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · tfpr dev · redaction: none

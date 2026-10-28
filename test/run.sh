@@ -118,18 +118,18 @@ for name in truncated large; do
   assert_lacks "${name} (azure): no <details>" "${out}" "<details"
   assert_lacks "${name} (azure): no diff fence" "${out}" '```diff'
   assert_lacks "${name} (azure): no hidden markup" "${out}" "<!--"
-  if head -n 3 "${sandbox}/render.md" | grep -q '^> \*\*'; then pass; else
-    fail "${name} (azure): the banner is not right under the headline"; fi
+  if head -n 4 "${sandbox}/render.md" | grep -q '^> \*\*'; then pass; else
+    fail "${name} (azure): the banner is not right under the headline and status line"; fi
   chars="$(LC_ALL=en_US.UTF-8 wc -m < "${sandbox}/render.md" | tr -d ' ')"
   if [[ "${chars}" -le 140000 ]]; then pass; else fail "${name} (azure): ${chars} characters, over 140,000"; fi
 done
 
 # The truncated and large fixtures must be cut, and say so up front: the
-# banner is within the comment's first five lines, every delete is listed,
-# and the whole comment fits GitHub's limit.
+# banner is right under the headline and status line (the comment's first six
+# lines), every delete is listed, and the whole comment fits GitHub's limit.
 for name in truncated large; do
-  if head -n 5 "${name}/expected.md" | grep -q '^> \*\*Plan text truncated\*\*'; then pass; else
-    fail "${name}: no truncation banner in the first five lines"; fi
+  if head -n 6 "${name}/expected.md" | grep -q '^> \*\*Plan text truncated\*\*'; then pass; else
+    fail "${name}: no truncation banner in the first six lines"; fi
 done
 # Bytes bound characters from above.
 size="$(wc -c < large/expected.md | tr -d ' ')"
