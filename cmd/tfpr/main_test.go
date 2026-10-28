@@ -1190,8 +1190,8 @@ func (f *fakeAzureRepos) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Azure Pipelines building an Azure Repos repo: outputs are logging
-// commands, and the plan lands in a PR thread whose properties carry the
-// marker and record.
+// commands, and the plan lands in a PR thread whose one property is the
+// marker; the record and state are the comment's last two lines.
 func TestAzureReposComment(t *testing.T) {
 	ado := &fakeAzureRepos{}
 	srv := httptest.NewServer(ado)
@@ -1207,9 +1207,12 @@ func TestAzureReposComment(t *testing.T) {
 	eq(t, "no-op plans start closed", "closed", ado.created["status"])
 	props := ado.created["properties"].(map[string]any)
 	eq(t, "marker property", "<!-- tf-plan:stack :: default -->", props["tfpr.marker"].(map[string]any)["$value"])
-	has(t, "record property", props["tfpr.record"].(map[string]any)["$value"].(string), `"status":"no_op"`)
+	eq(t, "only the marker property (write-once)", 1, len(props))
 	content := ado.created["comments"].([]any)[0].(map[string]any)["content"].(string)
-	lacks(t, "no hidden markup in the text", content, "<!--")
+	lines := strings.Split(content, "\n")
+	has(t, "record line", lines[len(lines)-2], `<!-- tfpr:plan@1 {"key":"stack:default"`)
+	has(t, "state line", lines[len(lines)-1], `<!-- tfpr:thread {"fp":"sha256:`)
+	lacks(t, "no marker in the text", content, "tf-plan:")
 	has(t, "the plan", content, "Terraform plan")
 	eq(t, "no GitHub calls", "", r.api)
 }

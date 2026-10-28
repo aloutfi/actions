@@ -10,6 +10,7 @@ import (
 	"github.com/aloutfi/actions/ci"
 	"github.com/aloutfi/actions/core"
 	"github.com/aloutfi/actions/redact"
+	"github.com/aloutfi/actions/vcs"
 )
 
 // minCommentBody is the smallest body budget tfpr accepts: room for the
@@ -38,9 +39,9 @@ func (a *app) renderPlan(r core.PlanResult, texts map[string]string, links core.
 		return body, "", "", err
 	}
 	marker, record = core.PlanMarker(r.Target.Stack, r.Target.Workspace), core.Record(r)
-	head := 0
-	if host.HiddenHTML { // the marker and record go above the body, two lines
-		head = utf8.RuneCountInString(marker+record) + 2
+	head := utf8.RuneCountInString(marker+record) + 2 // the marker and record go above the body
+	if !host.HiddenHTML {
+		head = vcs.StateOverhead(record) // Azure Repos: the record and state go below it
 	}
 	if limit < head+minCommentBody {
 		return body, "", "", fmt.Errorf("TFPR_COMMENT_BUDGET is %d characters; this comment needs at least %d (%d for its marker and record, %d for a minimal body)",

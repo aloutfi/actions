@@ -215,6 +215,8 @@ func (a *app) renderApply(r core.ApplyReport, marker string) (redact.Text, error
 	}
 	if r.Host.HiddenHTML { // the marker goes above the body
 		limit -= utf8.RuneCountInString(marker) + 1
+	} else { // Azure Repos: the state goes below it
+		limit -= vcs.StateOverhead("")
 	}
 	r.Budget = limit
 	for tries := 0; ; tries++ {

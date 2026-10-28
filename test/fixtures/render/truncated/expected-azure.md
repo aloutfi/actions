@@ -1,7 +1,8 @@
 ### ⚠️ Terraform plan · `truncated` (`default`) · 40 to add, 0 to change, 2 to destroy
 [job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · [terraform 1.15.4](https://github.com/hashicorp/terraform/releases/tag/v1.15.4) · redaction: none
 
-> **Plan text truncated**: showing 3,182 of 8,766 characters; the full plan is linked above. The resource list below is complete.
+> **Plan text truncated**: showing 2,825 of 8,766 characters; the full plan is linked above.
+> **Resource list shortened**: every delete, replace and forget is listed; 3 lower-risk lines are counted, not listed.
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -48,12 +49,10 @@
 +   terraform_data.item["item35"]  create
 +   terraform_data.item["item36"]  create
 +   terraform_data.item["item37"]  create
-+   terraform_data.item["item38"]  create
-+   terraform_data.item["item39"]  create
-+   terraform_data.item["item40"]  create
 ```
++ 3 more `create` lines
 
-<details><summary>Plan output for truncated (truncated: 3,182 of 8,766 characters)</summary>
+<details><summary>Plan output for truncated (truncated: 2,825 of 8,766 characters)</summary>
 
 ```terraform
 
@@ -152,19 +151,6 @@ Terraform will perform the following actions:
 
   # terraform_data.item["item11"] will be created
   + resource "terraform_data" "item" {
-      + id     = (known after apply)
-      + input  = "value-11"
-      + output = (known after apply)
-    }
-
-  # terraform_data.item["item12"] will be created
-  + resource "terraform_data" "item" {
-      + id     = (known after apply)
-      + input  = "value-12"
-      + output = (known after apply)
-    }
-
-  # terraform_data.item["item13"] will be created
 ```
 
 </details>

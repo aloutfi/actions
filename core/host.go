@@ -29,7 +29,8 @@ var hosts = []Host{
 	//  - Details, DiffFence: verified in a PR thread: <details> collapses and
 	//    ```diff colours + and - lines (```terraform is not highlighted).
 	//  - SummaryDetails: on until the Extensions tab shows otherwise.
-	//  - HiddenHTML: the marker and record live in thread properties.
+	//  - HiddenHTML: the marker is a thread property; the record and state
+	//    are the comment's last lines (vcs/azure.go).
 	{Name: "azure", MaxComment: 140000, MaxSummary: 512 << 10, Details: true, DiffFence: true, SummaryDetails: true},
 }
 

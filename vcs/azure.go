@@ -1,6 +1,7 @@
 package vcs
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,10 +23,14 @@ func NewAzureClient(collectionURI, token string) *Client {
 }
 
 // Azure is Azure Repos, over the REST API (7.1). Each stack gets one PR
-// thread. The thread's properties carry tfpr's marker, record and
-// fingerprint, so the comment text needs no hidden markup. Only threads whose
-// first comment the build identity wrote (the identity from connectionData,
-// project- or collection-scoped) are ever touched.
+// thread. Thread properties are write-once (a PATCH that sets any fails
+// with 400), so a property carries only the marker, which never changes. The
+// record and tfpr's own state (fingerprint, the status it last set) are the
+// first comment's last two lines, hidden; only the author can edit a
+// comment. Threads written before that carry them in properties, which are
+// still read. Only threads whose first comment the build identity wrote (the
+// identity from connectionData, project- or collection-scoped) are ever
+// touched.
 //
 // Thread status: a resolved comment (no-op plan, apply result) is closed and
 // anything else is active, so a "Check for comment resolution" branch policy
@@ -47,13 +52,39 @@ func NewAzure(api *Client, repo string, ack bool) *Azure {
 	return &Azure{api: api, project: project, repo: name, ack: ack}
 }
 
-// Thread property names.
+// Thread property names. Only the marker is written; the others are read
+// from threads written before the record moved into the comment.
 const (
 	propMarker      = "tfpr.marker"
 	propRecord      = "tfpr.record"
 	propFingerprint = "tfpr.fingerprint"
 	propStatus      = "tfpr.status" // the status tfpr itself last set
 )
+
+// threadState is tfpr's own state on a thread, the first comment's last line.
+type threadState struct {
+	Fingerprint string `json:"fp,omitempty"`
+	Status      string `json:"status,omitempty"` // the status tfpr itself last set
+}
+
+const statePrefix, stateSuffix = "<!-- tfpr:thread ", " -->"
+
+// StateOverhead is the most characters Azure Repos adds to a comment body
+// with record: a blank line, the record line and the state line.
+func StateOverhead(record string) int {
+	return 2 + len([]rune(record)) + 1 + len(statePrefix) + len(stateSuffix) + 120
+}
+
+// content is the first comment's text: body, then the record (if any) and
+// the state, last, where nothing from the body can follow them.
+func content(body, record string, st threadState) string {
+	data, _ := json.Marshal(st)
+	tail := statePrefix + string(data) + stateSuffix
+	if record != "" {
+		tail = record + "\n" + tail
+	}
+	return body + "\n\n" + tail
+}
 
 // resolutions are the statuses a reviewer resolves a thread with.
 var resolutions = map[string]bool{"fixed": true, "closed": true, "byDesign": true, "wontFix": true}
@@ -102,8 +133,9 @@ type adoThread struct {
 	IsDeleted  bool                  `json:"isDeleted"`
 	Properties map[string]typedValue `json:"properties"`
 	Comments   []struct {
-		ID     int64 `json:"id"`
-		Author struct {
+		ID      int64  `json:"id"`
+		Content string `json:"content"`
+		Author  struct {
 			ID string `json:"id"`
 		} `json:"author"`
 	} `json:"comments"`
@@ -112,6 +144,22 @@ type adoThread struct {
 func (t adoThread) prop(name string) string {
 	s, _ := t.Properties[name].Value.(string)
 	return s
+}
+
+// tail is the record and state tfpr last wrote on the thread: the first
+// comment's last two lines, else (threads written before) its properties.
+func (t adoThread) tail() (record string, st threadState) {
+	lines := strings.Split(t.Comments[0].Content, "\n")
+	last := lines[len(lines)-1]
+	if js, ok := strings.CutPrefix(last, statePrefix); ok {
+		if js, ok = strings.CutSuffix(js, stateSuffix); ok && json.Unmarshal([]byte(js), &st) == nil {
+			if len(lines) > 1 && strings.HasPrefix(lines[len(lines)-2], "<!-- tfpr:plan@") {
+				record = lines[len(lines)-2]
+			}
+			return record, st
+		}
+	}
+	return t.prop(propRecord), threadState{Fingerprint: t.prop(propFingerprint), Status: t.prop(propStatus)}
 }
 
 // UpsertComment updates the build identity's thread for c.Marker on c.PR,
@@ -132,23 +180,19 @@ func (z *Azure) UpsertComment(c Comment) (string, error) {
 		found = &own[0]
 	}
 
-	props := map[string]typedValue{propMarker: str(c.Marker)}
-	if c.Record != "" {
-		props[propRecord] = str(c.Record)
-	}
-	if c.Fingerprint != "" {
-		props[propFingerprint] = str(c.Fingerprint)
-	}
 	status, reopened := z.status(c, found)
-	if status != "" {
-		props[propStatus] = str(status)
+	st := threadState{Fingerprint: c.Fingerprint, Status: status}
+	if status == "" { // unchanged: tfpr's last status stands
+		_, prev := found.tail()
+		st.Status = prev.Status
 	}
+	text := content(c.Body.String(), c.Record, st)
 
 	if found == nil {
 		thread := map[string]any{
-			"comments":   []map[string]any{{"parentCommentId": 0, "content": c.Body.String(), "commentType": 1}},
+			"comments":   []map[string]any{{"parentCommentId": 0, "content": text, "commentType": 1}},
 			"status":     status,
-			"properties": props,
+			"properties": map[string]typedValue{propMarker: str(c.Marker)},
 		}
 		if _, err := z.api.Do(http.MethodPost, z.path("/pullRequests/%s/threads", url.PathEscape(c.PR)), thread, nil); err != nil {
 			return "", err
@@ -158,7 +202,7 @@ func (z *Azure) UpsertComment(c Comment) (string, error) {
 
 	first := found.Comments[0].ID
 	threadPath := fmt.Sprintf("/pullRequests/%s/threads/%d", url.PathEscape(c.PR), found.ID)
-	if _, err := z.api.Do(http.MethodPatch, z.path("%s/comments/%d", threadPath, first), map[string]any{"content": c.Body.String()}, nil); err != nil {
+	if _, err := z.api.Do(http.MethodPatch, z.path("%s/comments/%d", threadPath, first), map[string]any{"content": text}, nil); err != nil {
 		return "", err
 	}
 	if reopened {
@@ -167,12 +211,11 @@ func (z *Azure) UpsertComment(c Comment) (string, error) {
 			return "", err
 		}
 	}
-	update := map[string]any{"properties": props}
+	// Status only: a thread PATCH that carries properties fails as a whole.
 	if status != "" {
-		update["status"] = status
-	}
-	if _, err := z.api.Do(http.MethodPatch, z.path("%s", threadPath), update, nil); err != nil {
-		return "", err
+		if _, err := z.api.Do(http.MethodPatch, z.path("%s", threadPath), map[string]any{"status": status}, nil); err != nil {
+			return "", err
+		}
 	}
 	return fmt.Sprintf("Updated thread %d on PR #%s", found.ID, c.PR), nil
 }
@@ -207,7 +250,8 @@ func (z *Azure) Records(pr, marker string) ([]string, error) {
 	}
 	records := make([]string, 0, len(own))
 	for _, t := range own {
-		records = append(records, t.prop(propRecord))
+		rec, _ := t.tail()
+		records = append(records, rec)
 	}
 	return records, nil
 }
@@ -223,10 +267,12 @@ func (z *Azure) status(c Comment, existing *adoThread) (status string, reopened 
 		return "closed", false
 	case !z.ack || existing == nil:
 		return "active", false
-	case existing.prop(propFingerprint) == c.Fingerprint:
+	}
+	_, st := existing.tail()
+	if st.Fingerprint == c.Fingerprint {
 		return "", false // unchanged: keep the reviewer's resolution
 	}
-	acknowledged := resolutions[existing.Status] && existing.Status != existing.prop(propStatus)
+	acknowledged := resolutions[existing.Status] && existing.Status != st.Status
 	return "active", acknowledged
 }
 
