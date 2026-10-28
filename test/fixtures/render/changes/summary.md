@@ -1,4 +1,5 @@
 ### ⚠️ Terraform plan · `changes` (`default`) · 1 to add, 1 to change, 1 to destroy, 1 to replace
+[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -57,5 +58,3 @@ Plan: 2 to add, 1 to change, 2 to destroy.
 ```
 
 </details>
-
-tfpr dev · redaction: none

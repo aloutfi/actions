@@ -1,4 +1,5 @@
 ### ⚠️ Terraform plan · `truncated` (`default`) · 40 to add, 0 to change, 2 to destroy
+[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -366,5 +367,3 @@ Changes to Outputs:
 </details>
 
 Outputs: `item_count` (update)
-
-tfpr dev · redaction: none

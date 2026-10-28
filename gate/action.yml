@@ -2,8 +2,9 @@ name: "Terraform Gate"
 description: >-
   Decide, with only the GitHub token, whether a merge-time run applies, so a
   later job holding cloud credentials can be skipped. A commit that is no
-  longer its branch's head is a clean skip (apply=false, exit 0): the run for
-  the newer head applies the newer tree. An unverifiable ref fails. With
+  longer its branch's head, where a newer commit changed the stack, is a clean
+  skip (apply=false, exit 0): the run for the newer head applies the newer
+  tree. An unverifiable ref fails. With
   skip_noop, a merge whose PR plan was a no-op is skipped too, but only when
   every check passes. Writes decision.json to the stack's plan dir.
 
@@ -16,6 +17,15 @@ inputs:
     description: Terraform workspace
     required: false
     default: "default"
+  paths:
+    description: >-
+      Paths outside the stack directory and its local modules whose changes
+      make an older commit superseded (var files, scripts), relative to the
+      repository root; one per line. A commit that is no longer its branch's
+      head still applies when nothing under the stack, its local modules or
+      these paths changed since.
+    required: false
+    default: ""
   skip_noop:
     description: >-
       Skip the apply when the PR's reviewed plan (tfpr's own comment record) was
@@ -27,7 +37,7 @@ inputs:
     required: false
     default: "github-actions[bot]"
   token:
-    description: Token for GitHub API calls (branch head, PR lookup, comments). Needs no cloud access.
+    description: Token for GitHub API calls (branch head, compare, PR lookup, comments). Needs no cloud access.
     required: false
     default: ${{ github.token }}
 
@@ -78,6 +88,7 @@ runs:
         TFPR_STACK: ${{ inputs.stack }}
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_SKIP_NOOP: ${{ inputs.skip_noop }}
+        TFPR_PATHS: ${{ inputs.paths }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
         TFPR_GITHUB_TOKEN: ${{ inputs.token }}
       run: '"${TFPR}" gate'

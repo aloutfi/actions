@@ -1,4 +1,5 @@
 ### 🔸 Terraform plan · `output-only` (`default`) · No resource changes; 1 output changes. Downstream `terraform_remote_state` readers are affected
+[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -18,5 +19,3 @@ state, without changing any real infrastructure.
 </details>
 
 Outputs: `label` (update)
-
-tfpr dev · redaction: none

@@ -66,16 +66,16 @@ func TestRenderPlanGoldens(t *testing.T) {
 }
 
 // Acceptance (architecture §9, Track A): a large plan's comment fits
-// GitHub's limit, puts the truncation banner within its first five lines,
-// and lists every delete and replace.
+// GitHub's limit, puts the full-plan links and the truncation banner right
+// under the headline, and lists every delete and replace.
 func TestLargePlanComment(t *testing.T) {
 	comment := fixtureComment(t, "large")
 	if n := utf8.RuneCountInString(comment); n > 65536 {
 		t.Errorf("%d characters, over GitHub's 65,536", n)
 	}
-	head := strings.SplitN(comment, "\n", 6)[:5]
-	if !strings.HasPrefix(head[3], "> **Plan text truncated**: showing ") {
-		t.Errorf("no banner in the first five lines:\n%s", strings.Join(head, "\n"))
+	head := strings.SplitN(comment, "\n", 7)[:6]
+	if !strings.Contains(head[3], " · [full plan](") || !strings.HasPrefix(head[5], "> **Plan text truncated**: showing ") {
+		t.Errorf("no status line and banner under the headline:\n%s", strings.Join(head, "\n"))
 	}
 	list := comment[strings.Index(comment, "```diff\n"):]
 	list = list[:strings.Index(list, "\n```\n")]
@@ -179,30 +179,56 @@ func TestUserTemplateSemantics(t *testing.T) {
 	}
 }
 
-// Overriding only the footer changes only the footer.
-func TestUserFooter(t *testing.T) {
+// Overriding only the status line changes only the status line.
+func TestUserStatus(t *testing.T) {
 	r := NewPlanResult(PlanResult{Target: Target{Stack: "infra", Workspace: "prod"}}, []Unit{fixtureUnit(t, "changes")})
 	c := PlanComment{Result: r, Texts: map[string]string{".": string(fixtureFile(t, "changes", "plan.txt"))}, Host: HostFor("github")}
 	def, err := RenderPlan(c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.Template = "{{define \"footer\"}}\nOwners: @infra-team · [Runbook](https://example.invalid/runbook)\n{{end}}\n"
+	c.Template = "{{define \"status\"}}Owners: @infra-team · [Runbook](https://example.invalid/runbook)\n{{end}}\n"
 	got, err := RenderPlan(c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cut := strings.LastIndex(def, "\n\n")
-	if got != def[:cut]+"\n\nOwners: @infra-team · [Runbook](https://example.invalid/runbook)\n" {
-		t.Errorf("footer override changed more than the footer:\n%s", got)
+	lines := strings.SplitN(def, "\n", 3)
+	if want := lines[0] + "\nOwners: @infra-team · [Runbook](https://example.invalid/runbook)\n" + lines[2]; got != want {
+		t.Errorf("status override changed more than the status line:\n%s", got)
 	}
 	// The defaults are untouched for the next render.
 	if again, _ := RenderPlan(PlanComment{Result: r, Texts: c.Texts, Host: c.Host}); again != def {
 		t.Errorf("a user template leaked into the defaults")
 	}
-	c.Template = "{{define \"footer\"}}{{.Nope}}{{end}}"
+	c.Template = "{{define \"status\"}}{{.Nope}}{{end}}"
 	if _, err := RenderPlan(c); err == nil {
 		t.Errorf("a broken user template rendered")
+	}
+}
+
+// The status line links tfpr and terraform to their release pages, and
+// names any version without one.
+func TestStatusReleaseLinks(t *testing.T) {
+	for _, tc := range []struct {
+		tool Tool
+		want string
+	}{
+		{Tool{Version: "0.3.0", Binary: "terraform", BinaryVersion: "1.17.1"},
+			" · [tfpr v0.3.0](https://github.com/aloutfi/actions/releases/tag/v0.3.0) · [terraform 1.17.1](https://github.com/hashicorp/terraform/releases/tag/v1.17.1) · redaction: none\n"},
+		{Tool{Version: "0.3.0-rc.1", Binary: "tofu", BinaryVersion: "1.10.0"},
+			" · [tfpr v0.3.0-rc.1](https://github.com/aloutfi/actions/releases/tag/v0.3.0-rc.1) · [tofu 1.10.0](https://github.com/opentofu/opentofu/releases/tag/v1.10.0) · redaction: none\n"},
+		{Tool{Version: "dev", Binary: "terraform", BinaryVersion: "unknown"}, " · tfpr dev · terraform unknown · redaction: none\n"},
+		{Tool{Version: "", Binary: "mytf", BinaryVersion: "1.17.1"}, " · tfpr dev · mytf 1.17.1 · redaction: none\n"},
+		{Tool{Version: "1.0.0](https://evil.invalid)"}, " · tfpr 1.0.0](https://evil.invalid) · redaction: none\n"},
+	} {
+		r := NewPlanResult(PlanResult{Tool: tc.tool, Target: Target{Stack: "s", Workspace: "w"}, Source: Source{SHA: "abc"}}, []Unit{fixtureUnit(t, "no-changes")})
+		got, err := RenderPlan(PlanComment{Result: r, Host: HostFor("github"), Links: links})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status := strings.SplitN(got, "\n", 3)[1] + "\n"; !strings.HasSuffix(status, tc.want) {
+			t.Errorf("%+v: status line %q, want it to end %q", tc.tool, status, tc.want)
+		}
 	}
 }
 
@@ -212,7 +238,7 @@ func TestOverflowFallsBackToMinimal(t *testing.T) {
 	r := NewPlanResult(PlanResult{Target: Target{Stack: "infra", Workspace: "prod"}}, []Unit{fixtureUnit(t, "large")})
 	c := PlanComment{
 		Result: r, Texts: map[string]string{".": string(fixtureFile(t, "large", "plan.txt"))}, Host: HostFor("github"), Links: links,
-		Template: `{{define "footer"}}{{range .Result.Units}}{{range .Resources}}{{.Address}} {{end}}{{end}}{{end}}`,
+		Template: `{{define "status"}}{{range .Result.Units}}{{range .Resources}}{{.Address}} {{end}}{{end}}{{end}}`,
 	}
 	got, err := RenderPlan(c)
 	if err != nil {
@@ -221,7 +247,7 @@ func TestOverflowFallsBackToMinimal(t *testing.T) {
 	if n := utf8.RuneCountInString(got); n > 65536 {
 		t.Errorf("fallback is %d characters", n)
 	}
-	for _, want := range []string{"> **Comment shortened**", "> Full plan: [job summary]", "| 3,000 | 40 | 25 | 5 |"} {
+	for _, want := range []string{"> **Comment shortened**", " · [full plan](", "| 3,000 | 40 | 25 | 5 |"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("fallback lacks %q:\n%s", want, got)
 		}

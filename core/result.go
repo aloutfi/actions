@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -51,6 +52,36 @@ type Tool struct {
 	Binary            string `json:"binary,omitempty"`         // basename of TFPR_TF_BIN
 	BinaryVersion     string `json:"binary_version,omitempty"` // terraform version
 	PlanFormatVersion string `json:"plan_format_version,omitempty"`
+}
+
+// ReleaseURL is the release page of this tfpr version; "" for a build that
+// is not a release (dev).
+func (t Tool) ReleaseURL() string { return ReleaseURL(t.Version) }
+
+// BinaryReleaseURL is the release page of the terraform or OpenTofu that
+// planned; "" for any other binary or version.
+func (t Tool) BinaryReleaseURL() string { return BinaryReleaseURL(t.Binary, t.BinaryVersion) }
+
+// releasedVersion is a version a release page can exist for.
+var releasedVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`)
+
+// ReleaseURL is the release page of tfpr version v (tags are "v" + v), or ""
+// when v is not a release version.
+func ReleaseURL(v string) string {
+	if !releasedVersion.MatchString(v) {
+		return ""
+	}
+	return "https://github.com/aloutfi/actions/releases/tag/v" + v
+}
+
+// BinaryReleaseURL is the release page of version v of binary (terraform or
+// tofu), or "" for any other binary or a version that is not a release.
+func BinaryReleaseURL(binary, v string) string {
+	repo := map[string]string{"terraform": "hashicorp/terraform", "tofu": "opentofu/opentofu"}[strings.TrimSuffix(binary, ".exe")]
+	if repo == "" || !releasedVersion.MatchString(v) {
+		return ""
+	}
+	return "https://github.com/" + repo + "/releases/tag/v" + v
 }
 
 // Target is what was planned: one PR comment and one artifact per Key.

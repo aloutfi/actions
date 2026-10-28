@@ -150,26 +150,73 @@ func TestSupersededGuard(t *testing.T) {
 			return head, err
 		}
 	}
+	touched := func(files []string, err error) func(string) ([]string, error) {
+		return func(head string) ([]string, error) {
+			if head != "def" {
+				t.Errorf("compared with %q, want def", head)
+			}
+			return files, err
+		}
+	}
+	changed := touched([]string{"infra/a.tf"}, nil)
 	for _, c := range []struct {
 		name    string
 		ref     string
 		attempt int
 		head    func(string) (string, error)
+		touched func(string) ([]string, error)
 		code    int
 		level   string
 		msg     string
 	}{
-		{"branch head", "refs/heads/main", 1, heads("abc", nil), GuardOK, "", "is the head of 'main'"},
-		{"branch moved", "refs/heads/main", 1, heads("def", nil), GuardSuperseded, "warning", "commit abc is no longer the head of 'main' (now def)"},
-		{"re-run, branch moved", "refs/heads/main", 2, heads("def", nil), GuardSuperseded, "warning", "(attempt=2)"},
-		{"head lookup fails", "refs/heads/main", 1, heads("", errors.New("boom")), GuardUnverified, "error", "could not read the head of 'main'"},
-		{"tag, first attempt", "refs/tags/v1", 1, nil, GuardOK, "warning", "non-branch ref 'refs/tags/v1'"},
-		{"tag, re-run", "refs/tags/v1", 2, nil, GuardUnverified, "error", "Re-run apply refused"},
-		{"no attempt counter", "", 0, nil, GuardUnverified, "error", "Re-run apply refused"},
+		{"branch head", "refs/heads/main", 1, heads("abc", nil), nil, GuardOK, "", "is the head of 'main'"},
+		{"branch moved", "refs/heads/main", 1, heads("def", nil), changed, GuardSuperseded, "warning", "commit abc is no longer the head of 'main' (now def) and the stack changed since (infra/a.tf)"},
+		{"re-run, branch moved", "refs/heads/main", 2, heads("def", nil), changed, GuardSuperseded, "warning", "(attempt=2)"},
+		{"branch moved, many files", "refs/heads/main", 1, heads("def", nil), touched([]string{"a", "b", "c", "d", "e"}, nil), GuardSuperseded, "warning", "(a, b, c, and 2 more)"},
+		{"branch moved, stack unchanged", "refs/heads/main", 1, heads("def", nil), touched(nil, nil), GuardOK, "", "abc is no longer the head of 'main' (now def), but nothing in the stack changed since"},
+		{"re-run, stack unchanged", "refs/heads/main", 2, heads("def", nil), touched(nil, nil), GuardOK, "", "nothing in the stack changed since"},
+		{"branch moved, compare fails", "refs/heads/main", 1, heads("def", nil), touched(nil, errors.New("diverged")), GuardSuperseded, "warning", "tfpr could not tell whether the stack changed since (diverged)"},
+		{"branch moved, no compare", "refs/heads/main", 1, heads("def", nil), nil, GuardSuperseded, "warning", "could not tell"},
+		{"head lookup fails", "refs/heads/main", 1, heads("", errors.New("boom")), nil, GuardUnverified, "error", "could not read the head of 'main'"},
+		{"tag, first attempt", "refs/tags/v1", 1, nil, nil, GuardOK, "warning", "non-branch ref 'refs/tags/v1'"},
+		{"tag, re-run", "refs/tags/v1", 2, nil, nil, GuardUnverified, "error", "Re-run apply refused"},
+		{"no attempt counter", "", 0, nil, nil, GuardUnverified, "error", "Re-run apply refused"},
 	} {
-		got := SupersededGuard(c.ref, "abc", c.attempt, c.head)
+		got := SupersededGuard(c.ref, "abc", c.attempt, c.head, c.touched)
 		if got.Code != c.code || got.Level != c.level || !strings.Contains(got.Message, c.msg) {
 			t.Errorf("%s: got %+v, want code %d level %q containing %q", c.name, got, c.code, c.level, c.msg)
+		}
+	}
+}
+
+func TestTouching(t *testing.T) {
+	files := []string{"infra/main.tf", "/infra2/x.tf", "modules/net/vpc.tf", "README.md"}
+	for _, c := range []struct {
+		paths []string
+		want  string
+	}{
+		{[]string{"infra"}, "infra/main.tf"},
+		{[]string{"infra2"}, "infra2/x.tf"},
+		{[]string{"infra", "modules"}, "infra/main.tf modules/net/vpc.tf"},
+		{[]string{"modules/net/vpc.tf"}, "modules/net/vpc.tf"},
+		{[]string{"other"}, ""},
+		{[]string{""}, "infra/main.tf infra2/x.tf modules/net/vpc.tf README.md"},
+		{[]string{"."}, "infra/main.tf infra2/x.tf modules/net/vpc.tf README.md"},
+	} {
+		if got := strings.Join(Touching(files, c.paths), " "); got != c.want {
+			t.Errorf("Touching(%q): got %q, want %q", c.paths, got, c.want)
+		}
+	}
+}
+
+func TestParsePaths(t *testing.T) {
+	got, err := ParsePaths(" modules/net/ ,\n./shared//vars\n\n.")
+	if err != nil || strings.Join(got, " ") != "modules/net shared/vars ." {
+		t.Errorf("got %q, %v", got, err)
+	}
+	for _, bad := range []string{"/abs/modules", "../modules", "a/../../b", `infra\modules`, "modules/**", "modules/*", "C:/repo/modules", "mod?"} {
+		if _, err := ParsePaths("ok\n" + bad); err == nil {
+			t.Errorf("%q: want an error", bad)
 		}
 	}
 }

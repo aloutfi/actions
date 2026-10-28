@@ -50,6 +50,10 @@ type VCS interface {
 	PRsForCommit(sha, ref string) ([]PR, error)
 	// BranchHead is the current head commit of branch (short name).
 	BranchHead(branch string) (string, error)
+	// ChangedFiles lists the files (repo-relative) changed from base to
+	// head, where base is an ancestor of head, renames under both names. It
+	// fails rather than return a partial list.
+	ChangedFiles(base, head string) ([]string, error)
 }
 
 // Config selects and configures a repo-host adapter.

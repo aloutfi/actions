@@ -131,9 +131,15 @@ commit, inside your cloud-auth task and through your scrubber. tfpr runs
 only before and after it, with only the access token:
 
 - `tfpr gate` decides whether to apply. A commit that is no longer the head
-  of its branch is a clean skip (`apply` is `false`, a warning, exit 0): the
-  run for the newer head applies the newer tree, which includes this
-  commit's changes. If tfpr can't verify the branch head, the step fails.
+  of its branch, where a newer commit changed the stack, is a clean skip
+  (`apply` is `false`, a warning, exit 0): the run for the newer head
+  applies the newer tree, which includes this commit's changes. If nothing
+  under the stack changed since, the commit's stack is the head's and it
+  applies; a newer run that skips unchanged stacks would otherwise never
+  apply it. The stack includes the local modules it calls; `TFPR_PATHS`
+  adds other paths it reads (repo-relative, one per line). If tfpr can't
+  verify the branch head, the step fails; if it can't read the diff, it
+  skips.
   Opt-in `TFPR_SKIP_NOOP=true` also skips when the merged PR's reviewed plan
   was a no-op and the merged tree is the tree that was planned; any doubt
   applies.
@@ -193,9 +199,8 @@ steps:
 
 - **Run applies one at a time.** Set `lockBehavior: sequential` and add an
   **Exclusive Lock** check to the service connection the apply uses. Queued
-  runs then wait their turn, and when a burst of merges lands, every run but
-  the newest reaches the gate superseded and skips. The newest applies
-  everything.
+  runs then wait their turn, and when a burst of merges lands, an older run
+  skips every stack a newer commit changed. The newest run applies those.
 - The gate writes `decision.json` to the stack's plan dir (`infra/.tfpr`).
   `report` reads it, so a skip or refusal needs no exit code. If the gate
   said apply but there is no exit code (for example, the AzureCLI task's

@@ -44,6 +44,43 @@ jobs:
           CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/tfpr" ./cmd/tfpr
           TFPR_BIN="${RUNNER_TEMP}/tfpr" test/run.sh
 
+  # Real terraform, from the oldest supported version to the newest: each
+  # re-plans the fixtures, which must still render the goldens (resource ids
+  # and hashes aside), and tfpr runs terraform itself on a fixture stack.
+  # Keep the newest entry in step with the actions' terraform_version default.
+  terraform:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        terraform: ["1.15.9", "1.16.7", "1.17.1"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ matrix.terraform }}
+          terraform_wrapper: false
+      - name: Re-plan the fixtures
+        # Every case but large, whose 3,000 resources add minutes, not coverage.
+        run: test/fixtures/generate.sh no-changes changes output-only truncated moved-removed moves-only forget import-update backticks html-stack
+      - name: Black-box suite on the new plans
+        run: |
+          CGO_ENABLED=0 go build -trimpath -o "${RUNNER_TEMP}/tfpr" ./cmd/tfpr
+          TFPR_BIN="${RUNNER_TEMP}/tfpr" test/run.sh --compat
+      - name: tfpr plan
+        env:
+          TFPR_STACK: test/fixtures/stack
+          TFPR_DIR: ${{ runner.temp }}/plan
+          WANT: ${{ matrix.terraform }}
+        run: |
+          "${RUNNER_TEMP}/tfpr" plan
+          "${RUNNER_TEMP}/tfpr" render > "${RUNNER_TEMP}/comment.md"
+          grep -F "[terraform ${WANT}](https://github.com/hashicorp/terraform/releases/tag/v${WANT})" "${RUNNER_TEMP}/comment.md"
+
   # Dogfood: plan the fixture stacks with the local action so every PR gets
   # real plan comments: a small one, and a 3,000-resource one that shows the
   # truncation banner, the shortened resource list and the full-plan links.
@@ -74,5 +111,5 @@ jobs:
       - uses: ./plan
         with:
           stack: ${{ matrix.stack }}
-          terraform_version: "1.16.5"
+          terraform_version: "1.17.1"
           output_planfile: "true"

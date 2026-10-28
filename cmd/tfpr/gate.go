@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -25,6 +29,9 @@ import (
 // superseded commit is a clean skip (exit 0); an unverifiable ref fails.
 func (a *app) gate() error {
 	a.loadCI()
+	if _, err := core.ParsePaths(os.Getenv("TFPR_PATHS")); err != nil {
+		return err
+	}
 	v, err := a.loadVCS()
 	if err != nil {
 		return err
@@ -70,7 +77,20 @@ func (a *app) runGate(v vcs.VCS) core.GateResult {
 		}
 		return head, err
 	}
-	guard := core.SupersededGuard(c.Ref, c.SHA, c.Attempt, branchHead)
+	touched := func(head string) ([]string, error) {
+		paths, err := a.stackPaths()
+		if err != nil {
+			fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
+			return nil, err
+		}
+		files, err := v.ChangedFiles(c.SHA, head)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
+			return nil, err
+		}
+		return core.Touching(files, paths), nil
+	}
+	guard := core.SupersededGuard(c.Ref, c.SHA, c.Attempt, branchHead, touched)
 	a.log(guard.Level, guard.Message)
 	g := core.GateResult{
 		Schema: core.DecisionSchema, Stack: a.stack, Workspace: a.workspace,
@@ -119,6 +139,68 @@ func (a *app) runGate(v vcs.VCS) core.GateResult {
 		a.ci.Log(ci.Notice, fmt.Sprintf("Applying '%s': it can't be skipped as a no-op (%s).", a.stack, d.Reason))
 	}
 	return g
+}
+
+// stackPaths are the repo paths whose changes supersede an older commit's
+// apply: the stack directory, the local modules it calls (source = "./..."
+// or "../...", followed recursively), and TFPR_PATHS, all relative to the
+// repository root. It fails if git can't place the stack in the repository:
+// a guessed path that matches nothing would let an older tree apply.
+func (a *app) stackPaths() ([]string, error) {
+	extra, err := core.ParsePaths(os.Getenv("TFPR_PATHS"))
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	cmd := exec.Command("git", "rev-parse", "--show-prefix")
+	cmd.Dir, cmd.Stdout, cmd.Env = a.stack, &out, redact.WithoutTFPR(os.Environ())
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git could not place stack '%s' in the repository: %w", a.stack, err)
+	}
+	prefix := strings.TrimSpace(out.String())
+	paths := []string{path.Clean("./" + prefix)}
+	for _, dir := range localModules(a.stack) {
+		if p := path.Join(prefix, dir); p != ".." && !strings.HasPrefix(p, "../") {
+			paths = append(paths, p)
+		}
+	}
+	return append(paths, extra...), nil
+}
+
+// localSource is a module call's local source, "./x" or "../x".
+var localSource = regexp.MustCompile(`(?m)^\s*source\s*=\s*"(\.\.?/[^"]*)"`)
+
+// localModules are the directories of the local modules stack calls,
+// directly or through other local modules, relative to stack
+// (slash-separated). It reads the .tf files the way terraform loads a
+// module: the directory's own, not its subdirectories'.
+func localModules(stack string) []string {
+	seen := map[string]bool{".": true}
+	var dirs []string
+	queue := []string{"."}
+	for len(queue) > 0 {
+		dir := queue[0]
+		queue = queue[1:]
+		files, _ := filepath.Glob(filepath.Join(stack, filepath.FromSlash(dir), "*.tf"))
+		for _, f := range files {
+			data, err := os.ReadFile(f)
+			if err != nil {
+				continue
+			}
+			for _, m := range localSource.FindAllStringSubmatch(string(data), -1) {
+				d := path.Join(dir, m[1])
+				if seen[d] {
+					continue
+				}
+				seen[d] = true
+				if fi, err := os.Stat(filepath.Join(stack, filepath.FromSlash(d))); err == nil && fi.IsDir() {
+					dirs = append(dirs, d)
+					queue = append(queue, d)
+				}
+			}
+		}
+	}
+	return dirs
 }
 
 // renderApply renders the apply-result body within the comment budget

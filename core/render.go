@@ -73,6 +73,9 @@ type Links struct {
 	PlanText string // the plan.txt artifact
 }
 
+// Any reports whether there is a link to the full plan.
+func (l Links) Any() bool { return l.Job != "" || l.Summary != "" || l.PlanText != "" }
+
 // PlanView is the data every plan template block receives.
 type PlanView struct {
 	Result   PlanResult
@@ -92,8 +95,8 @@ type PlanView struct {
 	Banner      Banner
 }
 
-// Banner is what the lines under the headline report. Show is false when
-// none applies.
+// Banner is what the lines under the status line report. Show is false
+// when none applies.
 type Banner struct {
 	Show bool
 	// Truncated means some plan text is cut; Shown and Total measure it, in
@@ -108,9 +111,8 @@ type Banner struct {
 	ListComplete bool
 	Unlisted     Num
 	RiskUnlisted Num
-	Forget       Num    // resources to be forgotten: removed from state, not destroyed
-	Redaction    string // Result.Redaction.Mode
-	Fallback     bool   // the minimal layout replaced the full one
+	Forget       Num  // resources to be forgotten: removed from state, not destroyed
+	Fallback     bool // the minimal layout replaced the full one
 }
 
 // UnitView is one unit's part of the comment. It embeds the Unit (Path,
@@ -216,8 +218,7 @@ func render(t *template.Template, c PlanComment, l layout) (string, error) {
 		}
 	}
 	// The fallback: never a comment cut off mid-HTML.
-	v.Banner = Banner{Show: true, Fallback: true, ListComplete: true, Forget: v.Banner.Forget,
-		Redaction: v.Banner.Redaction, Measure: v.Banner.Measure}
+	v.Banner = Banner{Show: true, Fallback: true, ListComplete: true, Forget: v.Banner.Forget, Measure: v.Banner.Measure}
 	t = bind(templates, c.Host)
 	out, err := execute(t, "minimal", v)
 	if err == nil && v.Reason != "" && l.measure.of(out) > l.budget {
@@ -279,7 +280,7 @@ func newView(c PlanComment, l layout) *PlanView {
 		Counts: tallyOf(r.Summary.Counts), Multi: len(r.Units) > 1,
 	}
 	v.Icon, v.Headline = headline(r.Summary.Status, r.Summary.Counts)
-	v.Banner = Banner{Forget: Num(r.Summary.Counts.Forget), Redaction: r.Redaction.Mode, Measure: l.measure.String()}
+	v.Banner = Banner{Forget: Num(r.Summary.Counts.Forget), Measure: l.measure.String()}
 	listLang := "text"
 	if c.Host.DiffFence {
 		listLang = "diff"

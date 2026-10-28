@@ -1,4 +1,5 @@
 ### ✅ Terraform plan · `no-changes` (`default`) · No changes
+[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
 
 <details open><summary>Plan output for no-changes</summary>
 
@@ -11,5 +12,3 @@ and found no differences, so no changes are needed.
 ```
 
 </details>
-
-tfpr dev · redaction: none

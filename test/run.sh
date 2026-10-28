@@ -4,13 +4,18 @@
 # repo host, and static checks on the action wrappers. Commands that call the
 # GitHub API are tested in cmd/tfpr against a fake API server.
 #
-# Usage: [TFPR_BIN=path/to/tfpr] test/run.sh [--update]   (--update rewrites goldens)
+# Usage: [TFPR_BIN=path/to/tfpr] test/run.sh [--update | --compat]
+#   --update rewrites goldens.
+#   --compat compares goldens with resource ids and hashes masked, for
+#     fixtures re-planned with another terraform (test/fixtures/generate.sh):
+#     every other byte must match.
 # Without TFPR_BIN, tfpr is built from this checkout with `go build`.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-update=false
+update=false compat=false
 [[ "${1:-}" == "--update" ]] && update=true
+[[ "${1:-}" == "--compat" ]] && compat=true
 failures=0
 passes=0
 
@@ -44,16 +49,24 @@ assert_lacks() {
 }
 
 # assert_golden NAME FILE ACTUAL: ACTUAL equals test/fixtures/FILE. A FILE
-# ending in .gz is compared unzipped (large fixtures).
+# ending in .gz is compared unzipped (large fixtures). With --compat, ids and
+# hashes are masked on both sides.
 assert_golden() {
   local golden="${root}/test/fixtures/$2"
-  if [[ "${golden}" == *.gz ]]; then
-    if [[ "${update}" == "true" ]]; then gzip -9n < "$3" > "${golden}"; fi
-    if gunzip -c "${golden}" | diff -u - "$3" > /dev/null; then pass; else fail "$1 (gunzip -c ${golden} | diff - $3)"; fi
-    return
+  if [[ "${update}" == "true" ]]; then
+    if [[ "${golden}" == *.gz ]]; then gzip -9n < "$3" > "${golden}"; else cp "$3" "${golden}"; fi
   fi
-  if [[ "${update}" == "true" ]]; then cp "$3" "${golden}"; fi
-  if diff -u "${golden}" "$3"; then pass; else fail "$1"; fi
+  if diff -u <(golden_text "${golden}") <(mask < "$3"); then pass; else fail "$1"; fi
+}
+golden_text() {
+  if [[ "$1" == *.gz ]]; then gunzip -c "$1" | mask; else mask < "$1"; fi
+}
+mask() {
+  if [[ "${compat}" == "true" ]]; then
+    sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/sha256:[0-9a-f]{64}/sha256:<hash>/g'
+  else
+    cat
+  fi
 }
 
 # cases FILE: the rows of a case table in test/cases/ (tab-separated, '#'
@@ -118,18 +131,18 @@ for name in truncated large; do
   assert_lacks "${name} (azure): no <details>" "${out}" "<details"
   assert_lacks "${name} (azure): no diff fence" "${out}" '```diff'
   assert_lacks "${name} (azure): no hidden markup" "${out}" "<!--"
-  if head -n 3 "${sandbox}/render.md" | grep -q '^> \*\*'; then pass; else
-    fail "${name} (azure): the banner is not right under the headline"; fi
+  if head -n 4 "${sandbox}/render.md" | grep -q '^> \*\*'; then pass; else
+    fail "${name} (azure): the banner is not right under the headline and status line"; fi
   chars="$(LC_ALL=en_US.UTF-8 wc -m < "${sandbox}/render.md" | tr -d ' ')"
   if [[ "${chars}" -le 140000 ]]; then pass; else fail "${name} (azure): ${chars} characters, over 140,000"; fi
 done
 
 # The truncated and large fixtures must be cut, and say so up front: the
-# banner is within the comment's first five lines, every delete is listed,
-# and the whole comment fits GitHub's limit.
+# banner is right under the headline and status line (the comment's first six
+# lines), every delete is listed, and the whole comment fits GitHub's limit.
 for name in truncated large; do
-  if head -n 5 "${name}/expected.md" | grep -q '^> \*\*Plan text truncated\*\*'; then pass; else
-    fail "${name}: no truncation banner in the first five lines"; fi
+  if head -n 6 "${name}/expected.md" | grep -q '^> \*\*Plan text truncated\*\*'; then pass; else
+    fail "${name}: no truncation banner in the first six lines"; fi
 done
 # Bytes bound characters from above.
 size="$(wc -c < large/expected.md | tr -d ' ')"

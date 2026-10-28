@@ -13,10 +13,10 @@ too large for one comment, the top of the comment looks like this:
 
 ```markdown
 ### ⚠️ Terraform plan · `large` (`default`) · 3,000 to add, 40 to change, 25 to destroy, 5 to replace
-> **Plan text truncated**: showing 42,594 of 600,946 characters.
-> **Resource list shortened**: every delete, replace and forget is listed; 2,555 lower-risk lines are counted, not listed.
-> Full plan: [job summary](…) · [plan.txt](…) · [job log](…)
-> Redaction: no redaction filter configured
+Commit `7c79a8b` · [job log](…) · [full plan](…) · [plan.txt](…) · [tfpr v0.3.0](…) · [terraform 1.17.1](…) · redaction: none
+
+> **Plan text truncated**: showing 42,748 of 600,946 characters; the full plan is linked above.
+> **Resource list shortened**: every delete, replace and forget is listed; 2,556 lower-risk lines are counted, not listed.
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -28,19 +28,21 @@ too large for one comment, the top of the comment looks like this:
 In order:
 
 1. **Headline**: status icon, stack, workspace and what the plan does.
-2. **Banner**, only when something needs attention: the plan text was cut
+2. **Status line**: the commit planned, links to the job log, the full plan
+   (job summary) and `plan.txt`, the tfpr and terraform versions (each a
+   link to its release notes), and the redaction mode.
+3. **Banner**, only when something needs attention: the plan text was cut
    ("showing N of M characters"), the resource list was shortened, or
-   resources will be forgotten. When there is a banner, it ends with
-   the full-plan links and the redaction state.
-3. **Counts**, including moves, forgets, output changes and drift.
-4. **Resources**: every changed resource from `plan.json`, riskiest first:
+   resources will be forgotten. The full plan is one click away, in the
+   status line above it.
+4. **Counts**, including moves, forgets, output changes and drift.
+5. **Resources**: every changed resource from `plan.json`, riskiest first:
    delete, replace, forget, update, import, move, create, read.
-5. **Plan output**: terraform's own text, collapsed. Lines like
+6. **Plan output**: terraform's own text, collapsed. Lines like
    `# (2 unchanged attributes hidden)` are left out of the comment
    (`TFPR_KEEP_UNCHANGED=true` keeps them). The job summary and `plan.txt`
    keep them.
-6. **Outputs** that change, then a footer with the commit, the job log, the
-   full plan, the tfpr version and the redaction mode.
+7. **Outputs** that change.
 
 The headline phrase follows the plan's status:
 
@@ -71,7 +73,7 @@ Within the limit:
   text into what is left, keeping a margin for the redaction filter.
 - If the result still does not fit, for example because a custom template
   prints every resource, or the filter made the text much longer, tfpr posts
-  a minimal comment instead: headline, banner, counts and links. A comment is
+  a minimal comment instead: headline, status line, banner and counts. A comment is
   never cut off mid-HTML.
 
 Counts are characters, not bytes, so non-ASCII text is measured the way
@@ -110,7 +112,7 @@ Set `TFPR_TEMPLATE` (action input `template`) to a file of your own:
   the whole comment. A file with only blocks, white space and comments
   keeps the default document.
 
-To change only the footer:
+The `footer` block is empty by default. To add lines at the end:
 
 ```gotemplate
 {{define "footer"}}
@@ -125,7 +127,7 @@ Owners: @infra-team · [Runbook](https://example.invalid/runbook)
     template: .github/tfpr-comment.tmpl
 ```
 
-The blocks are `header`, `banner`, `links`, `counts`, `unit`, `resources`,
+The blocks are `header`, `status`, `banner`, `counts`, `unit`, `resources`,
 `body`, `outputs`, `footer` and `failed` (the body of a failed plan).
 `minimal` is the fallback layout and always uses the built-in blocks. Most
 blocks get a `PlanView`: `.Result` (the PlanResult), `.Host`, `.Links`

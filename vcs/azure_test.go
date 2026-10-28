@@ -25,6 +25,7 @@ type fakeADO struct {
 	commits    map[string]string           // commit message by sha
 	prs        map[string]map[string]any   // PR by id
 	refs       []map[string]any
+	diffs      []map[string]any // commit diff pages, served in order
 
 	mu    sync.Mutex
 	calls []string
@@ -111,6 +112,16 @@ func (f *fakeADO) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(map[string]any{"commitId": sha, "comment": f.commits[sha]})
 	case strings.Contains(p, "/pullrequests/"):
 		reply(f.prs[p[strings.LastIndex(p, "/")+1:]])
+	case strings.HasSuffix(p, "/diffs/commits"):
+		if r.URL.Query().Get("diffCommonCommit") != "false" {
+			f.t.Errorf("diff without diffCommonCommit=false: %s", r.URL)
+		}
+		if len(f.diffs) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		reply(f.diffs[0])
+		f.diffs = f.diffs[1:]
 	case strings.HasSuffix(p, "/refs"):
 		reply(map[string]any{"value": f.refs})
 	default:
@@ -364,6 +375,35 @@ func TestAzureBranchHead(t *testing.T) {
 	}
 	if _, err := z.BranchHead("missing"); err == nil {
 		t.Error("want an error for a missing branch")
+	}
+}
+
+func TestAzureChangedFiles(t *testing.T) {
+	change := func(p, from string) map[string]any {
+		item := map[string]any{"path": p}
+		if from != "" {
+			item["originalPath"] = from
+		}
+		return map[string]any{"item": item}
+	}
+	f := &fakeADO{diffs: []map[string]any{
+		{"allChangesIncluded": false, "changes": []any{change("/infra/a.tf", "")}},
+		{"allChangesIncluded": true, "changes": []any{change("/infra/b.tf", "/old/b.tf")}},
+	}}
+	z := newADO(t, f, false)
+	files, err := z.ChangedFiles("abc", "def")
+	if err != nil || strings.Join(files, " ") != "infra/a.tf infra/b.tf old/b.tf" {
+		t.Errorf("got %q, %v", files, err)
+	}
+	if len(f.calls) != 2 {
+		t.Errorf("calls: %v", f.calls)
+	}
+	if _, err := newADO(t, &fakeADO{}, false).ChangedFiles("abc", "def"); err == nil {
+		t.Error("want an error when the diff can't be read")
+	}
+	behind := &fakeADO{diffs: []map[string]any{{"behindCount": 1, "changes": []any{change("/docs/x.md", "")}}}}
+	if _, err := newADO(t, behind, false).ChangedFiles("abc", "def"); err == nil {
+		t.Error("want an error when base is not an ancestor of head")
 	}
 }
 

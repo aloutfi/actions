@@ -210,6 +210,14 @@ func TestAzureGateAndReport(t *testing.T) {
 	eq(t, "report: a skip is resolved", any("closed"), ado.created["status"])
 	lacks(t, "report: Azure dialect", content, "<details")
 
+	// A newer head that changed only other stacks: apply.
+	s.gitCommit()
+	ado.diff = `{"allChangesIncluded":true,"changes":[{"item":{"path":"/other"}},{"item":{"path":"/other/main.tf"}}]}`
+	r = s.run("gate")
+	eq(t, "stack unchanged: exit code", 0, r.rc)
+	has(t, "stack unchanged: output variable", r.out, "##vso[task.setvariable variable=apply;isOutput=true]true\n")
+	ado.diff = ""
+
 	// At the head: apply, with the plan run from the thread's record.
 	ado.head = "squash1"
 	r = s.run("gate")
