@@ -103,5 +103,5 @@ jobs:
       - name: Move v<major> and v<major>.<minor>
         if: ${{ !contains(env.VERSION, '-') }} # not for prereleases
         run: |
-          for tag in "v${VERSION%%.*}" "v${VERSION%.*}"; do git tag -f -a "${tag}" -m "${tag}: v${VERSION}"; done
+          for tag in "v${VERSION%%.*}" "v${VERSION%.*}"; do git tag -f "${tag}"; done # lightweight: shallow clones of an annotated tag warn
           git push --force origin "refs/tags/v${VERSION%%.*}" "refs/tags/v${VERSION%.*}"
