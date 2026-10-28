@@ -1,5 +1,5 @@
 ### 🔀 Terraform plan · `moved-removed` (`default`) · No infrastructure changes; state-only: 1 moved, 2 forgotten
-[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
+[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · [terraform 1.15.4](https://github.com/hashicorp/terraform/releases/tag/v1.15.4) · redaction: none
 
 > **2 resources will be forgotten**: removed from state, not destroyed; they keep running, unmanaged.
 

@@ -33,6 +33,9 @@ exit "$failed"
   `TFPR_EXIT_CODE` (the plan's `-detailed-exitcode`) and `TFPR_PLANFILE` (the
   binary planfile, which is hashed, not copied). It writes the plan dir and
   sets the same step outputs as `plan`.
+- The comment's status line names the version that wrote `plan.json` (its
+  `terraform_version`) and links its release. Set `TFPR_BINARY=tofu` when
+  OpenTofu planned; the default is `terraform`.
 - `plan.json` must be exactly one JSON document. Anything else, such as stderr
   merged into stdout or a line-based scrubber that rewrote it, fails with a
   clear error instead of a guess.

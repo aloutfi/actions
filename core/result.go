@@ -84,6 +84,22 @@ func BinaryReleaseURL(binary, v string) string {
 	return "https://github.com/" + repo + "/releases/tag/v" + v
 }
 
+// binaryVersion is a version as terraform and OpenTofu print it.
+var binaryVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]{0,32}$`)
+
+// PlanBinaryVersion is the version that wrote planJSON (its top-level
+// terraform_version, which OpenTofu writes too), or "" when it is missing,
+// not a version, or planJSON is not JSON (DeriveUnit reports that).
+func PlanBinaryVersion(planJSON []byte) string {
+	var p struct {
+		Version string `json:"terraform_version"`
+	}
+	if json.Unmarshal(planJSON, &p) != nil || !binaryVersion.MatchString(p.Version) {
+		return ""
+	}
+	return p.Version
+}
+
 // Target is what was planned: one PR comment and one artifact per Key.
 type Target struct {
 	Stack     string `json:"stack"`

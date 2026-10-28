@@ -3,6 +3,8 @@
   "tool": {
     "version": "<version>",
     "runner": "byo",
+    "binary": "terraform",
+    "binary_version": "1.15.4",
     "plan_format_version": "1.2"
   },
   "target": {

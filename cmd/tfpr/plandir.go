@@ -57,6 +57,9 @@ func (a *app) derive() (err error) {
 			a.recordFailure(tool, mode, exit, err)
 		}
 	}()
+	if tool.Binary, err = byoBinary(); err != nil {
+		return err
+	}
 
 	if s := os.Getenv("TFPR_EXIT_CODE"); s != "" {
 		n, err := strconv.Atoi(s)
@@ -72,6 +75,7 @@ func (a *app) derive() (err error) {
 	if err != nil {
 		return err
 	}
+	tool.BinaryVersion = core.PlanBinaryVersion(planJSON)
 	planTxt, err := readInput("TFPR_PLAN_TXT", "terraform show -no-color")
 	if err != nil {
 		return err
@@ -102,6 +106,18 @@ func (a *app) derive() (err error) {
 	}
 	fmt.Fprintf(a.stderr, "Wrote %s: %s, redaction %s.\n", filepath.Join(a.planDir(), "plan-result.json"), r.Summary.Status, mode)
 	return nil
+}
+
+// byoBinary is the binary that made a brought plan: TFPR_BINARY, terraform
+// or tofu (default terraform). It names the version in the comment and picks
+// its release link.
+func byoBinary() (string, error) {
+	switch b := envOr("TFPR_BINARY", "terraform"); b {
+	case "terraform", "tofu":
+		return b, nil
+	default:
+		return "", fmt.Errorf("TFPR_BINARY must be terraform or tofu, got '%s'", b)
+	}
 }
 
 // readInput reads the file named by the environment variable env.

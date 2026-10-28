@@ -6,9 +6,9 @@
 #
 # Usage: [TFPR_BIN=path/to/tfpr] test/run.sh [--update | --compat]
 #   --update rewrites goldens.
-#   --compat compares goldens with resource ids and hashes masked, for
-#     fixtures re-planned with another terraform (test/fixtures/generate.sh):
-#     every other byte must match.
+#   --compat compares goldens with resource ids, hashes and the terraform
+#     version masked, for fixtures re-planned with another terraform
+#     (test/fixtures/generate.sh): every other byte must match.
 # Without TFPR_BIN, tfpr is built from this checkout with `go build`.
 set -euo pipefail
 
@@ -49,8 +49,8 @@ assert_lacks() {
 }
 
 # assert_golden NAME FILE ACTUAL: ACTUAL equals test/fixtures/FILE. A FILE
-# ending in .gz is compared unzipped (large fixtures). With --compat, ids and
-# hashes are masked on both sides.
+# ending in .gz is compared unzipped (large fixtures). With --compat, ids,
+# hashes and the terraform version are masked on both sides.
 assert_golden() {
   local golden="${root}/test/fixtures/$2"
   if [[ "${update}" == "true" ]]; then
@@ -63,7 +63,9 @@ golden_text() {
 }
 mask() {
   if [[ "${compat}" == "true" ]]; then
-    sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/sha256:[0-9a-f]{64}/sha256:<hash>/g'
+    sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/sha256:[0-9a-f]{64}/sha256:<hash>/g
+      s/"binary_version": "[^"]*"/"binary_version": "<version>"/g
+      s#\[terraform [^]]*\]\(https://github\.com/hashicorp/terraform/releases/tag/v[^)]*\)#[terraform <version>](<release>)#g'
   else
     cat
   fi
