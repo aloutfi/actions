@@ -209,6 +209,22 @@ steps:
   only a warning.
   `TFPR_APPLY_EXIT_CODE`, set by the apply step as a pipeline variable,
   reaches report as an environment variable.
+- **Several stacks in one job.** The gate decides one stack per call, and
+  its `apply` output is that call's. When one step loops over stacks, act
+  on each stack's `decision.json` instead of the step output.
+  `decision.json` is a stable contract (`"schema": "tfpr/decision@1"`):
+  within `@1`, fields are only added, never renamed or removed. The fields
+  to act on are `action` (`apply`, `skip` or `refuse`), `reason`, `stack`,
+  `workspace` and `sha`. Check `schema`, and that `sha` is the commit being
+  built, before acting on `action`:
+
+  ```sh
+  for stack in infra/net infra/app; do
+    jq -e --arg sha "$(Build.SourceVersion)" \
+      '.schema == "tfpr/decision@1" and .sha == $sha and .action == "apply"' \
+      "${stack}/.tfpr/decision.json" > /dev/null && ./apply.sh "${stack}"
+  done
+  ```
 - `report` finds the merged PR from the merge commit: `pullrequestquery`,
   or the `Merged PR <id>:` title of a squash merge, accepted only if that PR
   really merged this commit into this branch. Without a PR it just logs.

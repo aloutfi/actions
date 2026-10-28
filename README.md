@@ -369,7 +369,8 @@ reason.
 ### gate
 
 The decision of `apply` alone, with only the GitHub token. It writes
-`decision.json` to the stack's plan dir.
+`decision.json` to the stack's plan dir, a stable contract
+(`tfpr/decision@1`; see [docs/azure-devops.md](docs/azure-devops.md)).
 
 ```yaml
 - uses: aloutfi/actions/gate@v0.3.0
