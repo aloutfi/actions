@@ -28,9 +28,9 @@ var hosts = []Host{
 	//    to load; the summary falls back to its minimal layout past it.
 	//  - Details, DiffFence: verified in a PR thread: <details> collapses and
 	//    ```diff colours + and - lines (```terraform is not highlighted).
-	//  - SummaryDetails: unverified on the Extensions tab, so headings there.
+	//  - SummaryDetails: on until the Extensions tab shows otherwise.
 	//  - HiddenHTML: the marker and record live in thread properties.
-	{Name: "azure", MaxComment: 140000, MaxSummary: 512 << 10, Details: true, DiffFence: true},
+	{Name: "azure", MaxComment: 140000, MaxSummary: 512 << 10, Details: true, DiffFence: true, SummaryDetails: true},
 }
 
 // HostFor is the row for name, or the default row.
