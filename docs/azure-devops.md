@@ -316,8 +316,7 @@ combine the matrix legs' outputs in a later job:
   and a colored ```` ```diff ```` resource list, at most 140,000 characters
   (comments of about 135,600 have posted). ```` ```terraform ```` fences are
   not highlighted on Azure Repos, but render as plain code.
-- The Extensions-tab summary uses headings instead of `<details>`; it is
-  shown expanded anyway.
+- The Extensions-tab summary uses the same layout, expanded.
 - A PR build plans the merge commit. tfpr records `Build.SourceVersion` (the
   merge commit) as `source.sha` and the PR head,
   `System.PullRequest.SourceCommitId`, as `source.head_sha`, like GitHub
@@ -328,8 +327,9 @@ combine the matrix legs' outputs in a later job:
 
 These are assumptions until checked:
 
-- Whether the Extensions tab renders `<details>`. Until it is checked, the
-  summary uses headings.
+- Whether the Extensions tab renders `<details>`. If it shows raw tags,
+  `SummaryDetails: false` on the `azure` row in `core/host.go` turns them
+  into headings there.
 - The size limit of `task.uploadsummary`, which is undocumented. tfpr keeps
   the summary under 512 KiB and falls back to a minimal summary past that.
 

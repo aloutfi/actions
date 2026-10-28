@@ -1233,7 +1233,7 @@ func TestAzureJobSummary(t *testing.T) {
 	summary, err := os.ReadFile(m[1])
 	must(t, err)
 	has(t, "summary: the plan", string(summary), "Terraform plan")
-	lacks(t, "summary: headings on the Extensions tab", string(summary), "<details")
+	has(t, "summary: collapsible plan output", string(summary), "<details open><summary>")
 	content := ado.created["comments"].([]any)[0].(map[string]any)["content"].(string)
 	has(t, "comment links the run for the full plan", content, "[full plan]("+srv.URL+"/org/proj/_build/results?buildId=812)")
 	has(t, "comment: collapsible plan", content, "<details><summary>Plan output for stack</summary>")
