@@ -1,5 +1,5 @@
 ### ✅ Terraform plan · `no-changes` (`default`) · No changes
-[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
+[plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · [terraform 1.15.4](https://github.com/hashicorp/terraform/releases/tag/v1.15.4) · redaction: none
 
 <details open><summary>Plan output for no-changes</summary>
 

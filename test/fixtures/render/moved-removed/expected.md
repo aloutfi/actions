@@ -1,7 +1,7 @@
 <!-- tf-plan:moved-removed :: default -->
 <!-- tfpr:plan@1 {"key":"moved-removed:default","sha":"","head_sha":"","tree":"","exit":2,"status":"state_only","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:8773ec38e9b8ff68a5f9b9820671d5b1d51204f72c3e74ac6fea3a9d6b60bacd","run":"","attempt":0} -->
 ### 🔀 Terraform plan · `moved-removed` (`default`) · No infrastructure changes; state-only: 1 moved, 2 forgotten
-[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
+[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · [terraform 1.15.4](https://github.com/hashicorp/terraform/releases/tag/v1.15.4) · redaction: none
 
 > **2 resources will be forgotten**: removed from state, not destroyed; they keep running, unmanaged.
 

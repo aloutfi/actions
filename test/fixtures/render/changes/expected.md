@@ -1,7 +1,7 @@
 <!-- tf-plan:changes :: default -->
 <!-- tfpr:plan@1 {"key":"changes:default","sha":"","head_sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:acfd4def8e7db664efdd945e623d0e762364453f577deaf619bbc4c822e49ec0","run":"","attempt":0} -->
 ### ⚠️ Terraform plan · `changes` (`default`) · 1 to add, 1 to change, 1 to destroy, 1 to replace
-[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
+[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · [terraform 1.15.4](https://github.com/hashicorp/terraform/releases/tag/v1.15.4) · redaction: none
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|

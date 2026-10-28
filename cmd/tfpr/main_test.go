@@ -874,6 +874,33 @@ func TestDeriveMissingInputs(t *testing.T) {
 	has(t, "missing files: summary exit", res, `"exit_code": 1`)
 }
 
+// A brought plan records the version that wrote plan.json, labelled with
+// TFPR_BINARY, so the comment links its release.
+func TestDeriveBinaryVersion(t *testing.T) {
+	s := newScenario(t)
+	s.byo("no-changes")
+	res := s.planResult()
+	has(t, "binary", res, `"binary": "terraform"`)
+	has(t, "version", res, `"binary_version": "1.15.4"`)
+
+	s = newScenario(t).set("TFPR_BINARY", "tofu")
+	s.byo("no-changes")
+	has(t, "tofu", s.planResult(), `"binary": "tofu"`)
+	r := s.set("GITHUB_EVENT_NAME", "pull_request").run("comment")
+	has(t, "tofu link", r.body, "[tofu 1.15.4](https://github.com/opentofu/opentofu/releases/tag/v1.15.4)")
+
+	s = newScenario(t)
+	s.write("plan.json", `{"format_version":"1.2","terraform_version":"1.15.4\n[x](https://evil)","planned_values":{},"resource_changes":[]}`)
+	s.write("plan.txt", "No changes.")
+	eq(t, "odd version: exit code", 0, s.set("TFPR_PLAN_JSON", "plan.json", "TFPR_PLAN_TXT", "plan.txt").run("derive").rc)
+	lacks(t, "odd version: dropped", s.planResult(), "binary_version")
+
+	s = newScenario(t).set("TFPR_BINARY", "pulumi", "TFPR_PLAN_JSON", "plan.json", "TFPR_PLAN_TXT", "plan.txt")
+	r = s.run("derive")
+	eq(t, "bad binary: exit code", 1, r.rc)
+	has(t, "bad binary: recorded", s.planResult(), "TFPR_BINARY must be terraform or tofu, got 'pulumi'")
+}
+
 // A failed plan replaces the stack's last good comment instead of leaving
 // it standing as if current.
 func TestPlanFailureReplacesTheComment(t *testing.T) {

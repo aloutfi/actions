@@ -35,6 +35,7 @@
 //	TFPR_PLAN_JSON, TFPR_PLAN_TXT   derive: terraform show -json / -no-color output
 //	TFPR_EXIT_CODE                  derive: the plan's -detailed-exitcode (optional)
 //	TFPR_PLANFILE                   derive: the binary planfile, hashed (optional)
+//	TFPR_BINARY                     derive: terraform or tofu, which wrote plan.json (terraform)
 //	TFPR_JOB_URL, TFPR_SUMMARY_URL  render: job log and job summary links (comment
 //	                                fills these in)
 //	TFPR_PLAN_TXT_URL               render/comment: link to the plan.txt artifact

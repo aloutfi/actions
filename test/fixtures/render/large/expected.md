@@ -1,9 +1,9 @@
 <!-- tf-plan:large :: default -->
 <!-- tfpr:plan@1 {"key":"large:default","sha":"","head_sha":"","tree":"","exit":2,"status":"changes","units":1,"apply":["."],"provisional":[],"planset":"","fp":"sha256:3242942dab543e188f96b849e530f1ee4e62b6dd5129fcf5c87fe97c6f587fbb","run":"","attempt":0} -->
 ### ⚠️ Terraform plan · `large` (`default`) · 3,000 to add, 40 to change, 25 to destroy, 5 to replace
-[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · redaction: none
+[job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · tfpr dev · [terraform 1.15.4](https://github.com/hashicorp/terraform/releases/tag/v1.15.4) · redaction: none
 
-> **Plan text truncated**: showing 42,748 of 600,946 characters; the full plan is linked above.
+> **Plan text truncated**: showing 42,659 of 600,946 characters; the full plan is linked above.
 > **Resource list shortened**: every delete, replace and forget is listed; 2,556 lower-risk lines are counted, not listed.
 
 | Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
@@ -529,7 +529,7 @@
 ```
 + 2,556 more `create` lines
 
-<details><summary>Plan output for large (truncated: 42,748 of 600,946 characters)</summary>
+<details><summary>Plan output for large (truncated: 42,659 of 600,946 characters)</summary>
 
 ```terraform
 
@@ -2086,10 +2086,6 @@ Terraform will perform the following actions:
   + resource "terraform_data" "bulk" {
       + id     = (known after apply)
       + input  = "bulk-220"
-      + output = (known after apply)
-    }
-
-  # terraform_data.bulk[221] will be created
 ```
 
 </details>

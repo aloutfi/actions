@@ -34,7 +34,7 @@ func fixtureComment(t *testing.T, name string) string {
 		limit, _ = strconv.Atoi(strings.TrimSpace(string(b)))
 	}
 	r := NewPlanResult(PlanResult{
-		Tool: Tool{Version: "dev", Runner: "byo"}, Target: Target{Stack: stack, Workspace: "default"},
+		Tool: Tool{Version: "dev", Runner: "byo", Binary: "terraform", BinaryVersion: PlanBinaryVersion(fixtureFile(t, name, "plan.json"))}, Target: Target{Stack: stack, Workspace: "default"},
 		Redaction: Redaction{Mode: "none"},
 	}, []Unit{fixtureUnit(t, name)})
 	head := PlanMarker(stack, "default") + "\n" + Record(r) + "\n"
