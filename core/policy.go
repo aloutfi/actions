@@ -1,7 +1,9 @@
 package core
 
 import (
+	"errors"
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -82,7 +84,7 @@ func DescribeDecision(d Decision, attempt int, artifact, planRun string) Decisio
 // Guard outcomes.
 const (
 	GuardOK         = 0 // the fresh apply may run
-	GuardSuperseded = 1 // the commit is no longer the branch head
+	GuardSuperseded = 1 // the branch head moved on and changed the stack
 	GuardUnverified = 2 // the head could not be checked
 )
 
@@ -95,13 +97,17 @@ type GuardResult struct {
 	Head    string // the branch head, when it was read
 }
 
-// SupersededGuard decides whether a fresh apply of sha (built from ref) may
-// run. A fresh apply runs -auto-approve on this commit's tree; if the branch
-// has moved on, applying it rolls back everything merged since. Only the
-// branch head may fresh-apply. Planfile applies skip this check, because
-// terraform rejects a planfile whose state moved.
-// branchHead looks up the current head of a branch.
-func SupersededGuard(ref, sha string, attempt int, branchHead func(branch string) (string, error)) GuardResult {
+// SupersededGuard decides whether an apply of sha (built from ref) may run.
+// If the branch has moved on and the newer commits changed the stack,
+// applying sha's tree would roll back what was merged since, so it is a
+// clean skip: the run for the newer head applies the stack. If they did not
+// change it (touched lists no files), sha's stack is the head's stack and
+// the apply runs; under path filters the newer head's run may never apply
+// this stack, so skipping would lose sha's change. touched lists the files
+// under the stack's paths changed between sha and a head; an error, or a nil
+// touched, counts as changed. branchHead looks up the current head of a
+// branch.
+func SupersededGuard(ref, sha string, attempt int, branchHead func(branch string) (string, error), touched func(head string) ([]string, error)) GuardResult {
 	branch, ok := strings.CutPrefix(ref, "refs/heads/")
 	if !ok {
 		if !IsFirstAttempt(attempt) {
@@ -117,10 +123,45 @@ func SupersededGuard(ref, sha string, attempt int, branchHead func(branch string
 		return GuardResult{GuardUnverified, "error", fmt.Sprintf(
 			"Fresh apply refused: could not read the head of '%s' to rule out applying a superseded tree.", branch), ""}
 	}
-	if head != sha {
-		return GuardResult{GuardSuperseded, "warning", fmt.Sprintf(
-			"Skipping the apply (attempt=%d): commit %s is no longer the head of '%s' (now %s). Applying its tree would roll back later merges; the run for %s applies these changes.",
-			attempt, sha, branch, head, head), head}
+	if head == sha {
+		return GuardResult{GuardOK, "", fmt.Sprintf("Superseded-tree check passed: %s is the head of '%s'.", sha, branch), head}
 	}
-	return GuardResult{GuardOK, "", fmt.Sprintf("Superseded-tree check passed: %s is the head of '%s'.", sha, branch), head}
+	var files []string
+	err = errors.New("no way to compare commits")
+	if touched != nil {
+		files, err = touched(head)
+	}
+	if err == nil && len(files) == 0 {
+		return GuardResult{GuardOK, "", fmt.Sprintf(
+			"Superseded-tree check passed: %s is no longer the head of '%s' (now %s), but nothing in the stack changed since, so applying it applies the head's stack.",
+			sha, branch, head), head}
+	}
+	why := "the stack changed since (" + strings.Join(files[:min(len(files), 3)], ", ")
+	if len(files) > 3 {
+		why += fmt.Sprintf(", and %d more", len(files)-3)
+	}
+	why += ")"
+	if err != nil {
+		why = fmt.Sprintf("tfpr could not tell whether the stack changed since (%s)", err)
+	}
+	return GuardResult{GuardSuperseded, "warning", fmt.Sprintf(
+		"Skipping the apply (attempt=%d): commit %s is no longer the head of '%s' (now %s) and %s. Applying its tree would roll back later merges; the run for %s applies these changes.",
+		attempt, sha, branch, head, why, head), head}
+}
+
+// Touching returns the files (repo-relative, slash-separated) at or under
+// any of paths. A path of "" or "." is the whole repository.
+func Touching(files, paths []string) []string {
+	var out []string
+	for _, f := range files {
+		f = strings.TrimPrefix(f, "/")
+		for _, p := range paths {
+			p = path.Clean("/" + strings.TrimSpace(p))[1:]
+			if p == "" || f == p || strings.HasPrefix(f, p+"/") {
+				out = append(out, f)
+				break
+			}
+		}
+	}
+	return out
 }

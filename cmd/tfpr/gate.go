@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -70,7 +72,16 @@ func (a *app) runGate(v vcs.VCS) core.GateResult {
 		}
 		return head, err
 	}
-	guard := core.SupersededGuard(c.Ref, c.SHA, c.Attempt, branchHead)
+	paths := a.stackPaths()
+	touched := func(head string) ([]string, error) {
+		files, err := v.ChangedFiles(c.SHA, head)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "tfpr: %s\n", err)
+			return nil, err
+		}
+		return core.Touching(files, paths), nil
+	}
+	guard := core.SupersededGuard(c.Ref, c.SHA, c.Attempt, branchHead, touched)
 	a.log(guard.Level, guard.Message)
 	g := core.GateResult{
 		Schema: core.DecisionSchema, Stack: a.stack, Workspace: a.workspace,
@@ -119,6 +130,26 @@ func (a *app) runGate(v vcs.VCS) core.GateResult {
 		a.ci.Log(ci.Notice, fmt.Sprintf("Applying '%s': it can't be skipped as a no-op (%s).", a.stack, d.Reason))
 	}
 	return g
+}
+
+// stackPaths are the repo paths whose changes supersede an older commit's
+// apply: the stack directory, repo-relative, plus TFPR_PATHS (repo-relative,
+// separated by newlines or commas), such as shared modules the stack uses.
+func (a *app) stackPaths() []string {
+	stack := filepath.ToSlash(filepath.Clean(a.stack))
+	var out bytes.Buffer
+	cmd := exec.Command("git", "rev-parse", "--show-prefix")
+	cmd.Dir, cmd.Stdout = a.stack, &out
+	if cmd.Run() == nil {
+		stack = strings.TrimSuffix(strings.TrimSpace(out.String()), "/")
+	}
+	paths := []string{stack}
+	for _, p := range strings.FieldsFunc(os.Getenv("TFPR_PATHS"), func(r rune) bool { return r == '\n' || r == ',' }) {
+		if p = strings.TrimSpace(p); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths
 }
 
 // renderApply renders the apply-result body within the comment budget

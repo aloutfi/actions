@@ -29,6 +29,7 @@ type fakeGitHub struct {
 	pr         string // PR number associated with every commit; "" for none
 	pulls      string // raw JSON for the commit's PRs, overriding pr
 	branchHead string
+	compare    string // JSON for comparing the commit with the branch head; "" is a change to stack/main.tf
 	headRun    string // html_url of the Actions run for the branch head, if any
 	failWrites bool
 	failList   bool   // listing comments fails
@@ -83,6 +84,8 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case strings.Contains(p, "/git/ref/heads/"):
 		io.WriteString(w, `{"object":{"sha":"`+f.branchHead+`"}}`)
+	case strings.Contains(p, "/compare/"):
+		io.WriteString(w, cmp.Or(f.compare, `{"status":"ahead","files":[{"filename":"stack/main.tf"}]}`))
 	case p == "/repos/o/r/actions/runs":
 		if f.headRun == "" {
 			io.WriteString(w, `{"workflow_runs":[]}`)
@@ -596,6 +599,32 @@ func TestApplySupersededGuard(t *testing.T) {
 	lacks(t, "non-branch re-run: no apply", r.tf, "terraform apply")
 	has(t, "non-branch re-run: reported", r.body, "refused")
 
+	// A newer head that did not change the stack does not supersede: under
+	// path filters its run may never apply this stack.
+	s = newScenario(t)
+	s.gh.branchHead, s.gh.compare = "def", `{"status":"ahead","files":[{"filename":"other/main.tf"},{"filename":"stack2/x.tf"}]}`
+	r = s.run("apply")
+	eq(t, "stack unchanged: exit code", 0, r.rc)
+	has(t, "stack unchanged: compares", r.api, "GET /repos/o/r/compare/abc...def?per_page=1")
+	has(t, "stack unchanged: says so", r.out, "abc is no longer the head of 'main' (now def), but nothing in the stack changed since")
+	has(t, "stack unchanged: applies", r.tf, "-auto-approve")
+
+	// TFPR_PATHS adds paths the stack depends on.
+	s = newScenario(t).set("TFPR_PATHS", "modules/net\nother")
+	s.gh.branchHead, s.gh.compare = "def", `{"status":"ahead","files":[{"filename":"modules/net/vpc.tf"}]}`
+	r = s.run("apply")
+	eq(t, "shared module changed: clean skip", 0, r.rc)
+	has(t, "shared module changed: names it", r.out, "the stack changed since (modules/net/vpc.tf)")
+	lacks(t, "shared module changed: no apply", r.tf, "terraform apply")
+
+	// A comparison that fails counts as a change.
+	s = newScenario(t)
+	s.gh.branchHead, s.gh.compare = "def", `{"status":"diverged","files":[]}`
+	r = s.run("apply")
+	eq(t, "diverged: clean skip", 0, r.rc)
+	has(t, "diverged: says so", r.out, "tfpr could not tell whether the stack changed since")
+	lacks(t, "diverged: no apply", r.tf, "terraform apply")
+
 	// A reviewed planfile of a superseded commit is skipped too: the newer
 	// run applies the newer tree.
 	s = newScenario(t).set("TFPR_USE_PLANFILE", "true", "TFPR_PLAN_DIR", "artifact")
@@ -1067,6 +1096,7 @@ type fakeAzureRepos struct {
 	head     string // main's head; "" is squash1
 	threads  string // JSON array of PR 7's existing threads; "" is none
 	builds   string // JSON array for the builds API
+	diff     string // JSON for the commit diff from the build's commit to head; "" is a change to stack/main.tf
 	mu       sync.Mutex
 	auth     string
 	created  map[string]any
@@ -1085,6 +1115,12 @@ func (f *fakeAzureRepos) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"results":[{"squash1":[{"pullRequestId":%d,"lastMergeSourceCommit":{"commitId":"headsha"}}]}]}`, f.mergedPR)
 	case strings.HasSuffix(r.URL.Path, "/refs"):
 		fmt.Fprintf(w, `{"value":[{"name":"refs/heads/main","objectId":%q}]}`, cmp.Or(f.head, "squash1"))
+	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/diffs/commits":
+		if q := r.URL.Query(); q.Get("baseVersion") != "squash1" || q.Get("targetVersion") != cmp.Or(f.head, "squash1") {
+			http.Error(w, `{"message":"unexpected versions"}`, http.StatusBadRequest)
+			return
+		}
+		io.WriteString(w, cmp.Or(f.diff, `{"allChangesIncluded":true,"changes":[{"item":{"path":"/stack/main.tf"}}]}`))
 	case r.URL.Path == "/org/proj/_apis/git/repositories/repo/pullRequests/7/threads" && r.Method == http.MethodGet:
 		fmt.Fprintf(w, `{"value":%s}`, cmp.Or(f.threads, "[]"))
 	case r.URL.Path == "/org/proj/_apis/build/builds":

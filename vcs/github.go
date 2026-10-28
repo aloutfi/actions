@@ -196,6 +196,40 @@ func (g *GitHub) BranchHead(branch string) (string, error) {
 	return ref.Object.SHA, nil
 }
 
+// compareFileLimit is the most files GitHub's compare API lists.
+const compareFileLimit = 300
+
+// ChangedFiles lists the files changed from base to head with the compare
+// API, which lists at most 300: more fails.
+func (g *GitHub) ChangedFiles(base, head string) ([]string, error) {
+	var cmp struct {
+		Status string `json:"status"`
+		Files  []struct {
+			Filename         string `json:"filename"`
+			PreviousFilename string `json:"previous_filename"`
+		} `json:"files"`
+	}
+	// per_page=1: only the first page lists files, and no commits are needed.
+	p := fmt.Sprintf("/repos/%s/compare/%s...%s?per_page=1", g.repo, url.PathEscape(base), url.PathEscape(head))
+	if _, err := g.api.Do(http.MethodGet, p, nil, &cmp); err != nil {
+		return nil, err
+	}
+	if cmp.Status != "ahead" {
+		return nil, fmt.Errorf("%s is not an ancestor of %s (compare status '%s')", base, head, cmp.Status)
+	}
+	if len(cmp.Files) >= compareFileLimit {
+		return nil, fmt.Errorf("%d or more files changed from %s to %s; GitHub lists only %d", compareFileLimit, base, head, compareFileLimit)
+	}
+	var files []string
+	for _, f := range cmp.Files {
+		files = append(files, f.Filename)
+		if f.PreviousFilename != "" {
+			files = append(files, f.PreviousFilename)
+		}
+	}
+	return files, nil
+}
+
 // escapePath escapes each segment of a slash-separated name such as a branch.
 func escapePath(p string) string {
 	parts := strings.Split(p, "/")

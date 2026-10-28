@@ -1,7 +1,8 @@
 name: "Terraform Apply"
 description: >-
-  Gate, apply and report. A commit that is no longer its branch's head is a
-  clean skip: the run for the newer head applies (first attempts on
+  Gate, apply and report. A commit that is no longer its branch's head, where
+  a newer commit changed the stack, is a clean skip: the run for the newer
+  head applies (first attempts on
   non-branch refs are allowed with a warning; anything unverifiable fails).
   Otherwise apply the reviewed planfile from the plan action's artifact (the
   plan run comes from tfpr's comment record on the merged PR), or a fresh
@@ -35,6 +36,14 @@ inputs:
       attempt, apply a fresh plan instead of failing.
     required: false
     default: "false"
+  paths:
+    description: >-
+      Repo paths besides the stack directory whose changes make an older
+      commit superseded, such as shared modules the stack uses; one per line.
+      A commit that is no longer its branch's head still applies when nothing
+      under the stack or these paths changed since.
+    required: false
+    default: ""
   skip_noop:
     description: >-
       Skip the apply when the PR's reviewed plan was a no-op and the merged tree
@@ -107,6 +116,7 @@ runs:
         TFPR_WORKSPACE: ${{ inputs.workspace }}
         TFPR_USE_PLANFILE: ${{ inputs.use_planfile }}
         TFPR_SKIP_NOOP: ${{ inputs.skip_noop }}
+        TFPR_PATHS: ${{ inputs.paths }}
         TFPR_PLAN_DIR: ${{ runner.temp }}/tfpr-plan-artifact
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
         TFPR_GITHUB_TOKEN: ${{ inputs.token }}
@@ -140,6 +150,7 @@ runs:
         TFPR_ALLOW_FRESH_PLAN_FALLBACK: ${{ inputs.allow_fresh_plan_fallback }}
         TFPR_PLAN_DIR: ${{ runner.temp }}/tfpr-plan-artifact
         TFPR_SKIP_NOOP: ${{ inputs.skip_noop }}
+        TFPR_PATHS: ${{ inputs.paths }}
         TFPR_LOCK_TIMEOUT: ${{ inputs.lock_timeout }}
         TFPR_COMMENT_AUTHOR: ${{ inputs.comment_author }}
         TFPR_GITHUB_TOKEN: ${{ inputs.token }}

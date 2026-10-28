@@ -199,6 +199,32 @@ func TestPRsForCommitAndBranchHead(t *testing.T) {
 	}
 }
 
+func TestGitHubChangedFiles(t *testing.T) {
+	reply := `{"status":"ahead","files":[{"filename":"infra/a.tf"},{"filename":"infra/b.tf","previous_filename":"old/b.tf"}]}`
+	s, api := newServer(t, ok(reply))
+	g := NewGitHub(api, "o/r", DefaultGitHubAuthor)
+	files, err := g.ChangedFiles("abc", "def")
+	if err != nil || strings.Join(files, " ") != "infra/a.tf infra/b.tf old/b.tf" {
+		t.Errorf("got %q, %v", files, err)
+	}
+	if got := s.calls[0]; got != "GET /repos/o/r/compare/abc...def?per_page=1" {
+		t.Errorf("call: %s", got)
+	}
+	for name, body := range map[string]string{
+		"diverged":  `{"status":"diverged","files":[]}`,
+		"too many":  `{"status":"ahead","files":[` + strings.TrimSuffix(strings.Repeat(`{"filename":"f"},`, 300), ",") + `]}`,
+		"not found": "",
+	} {
+		_, api := newServer(t, ok(body))
+		if body == "" {
+			_, api = newServer(t, ok(""), http.StatusNotFound)
+		}
+		if files, err := NewGitHub(api, "o/r", DefaultGitHubAuthor).ChangedFiles("abc", "def"); err == nil {
+			t.Errorf("%s: want an error, got %q", name, files)
+		}
+	}
+}
+
 func TestNew(t *testing.T) {
 	for _, c := range []struct {
 		name, repo string
@@ -231,6 +257,9 @@ func TestNoPR(t *testing.T) {
 	}
 	if _, err := v.BranchHead("main"); err == nil {
 		t.Error("BranchHead must fail so the guard refuses")
+	}
+	if _, err := v.ChangedFiles("abc", "def"); err == nil {
+		t.Error("ChangedFiles must fail")
 	}
 }
 

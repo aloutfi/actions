@@ -22,3 +22,8 @@ func (NoPR) PRsForCommit(string, string) ([]PR, error) { return nil, nil }
 func (NoPR) BranchHead(string) (string, error) {
 	return "", errors.New("no repository host configured")
 }
+
+// ChangedFiles cannot compare commits.
+func (NoPR) ChangedFiles(string, string) ([]string, error) {
+	return nil, errors.New("no repository host configured")
+}

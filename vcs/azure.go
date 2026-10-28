@@ -310,3 +310,41 @@ func (z *Azure) BranchHead(branch string) (string, error) {
 	}
 	return "", fmt.Errorf("no head commit for branch '%s'", branch)
 }
+
+// adoDiffPage and adoDiffMax bound ChangedFiles: changes per request, and in
+// all.
+const adoDiffPage, adoDiffMax = 1000, 20000
+
+// ChangedFiles lists the files changed from base to head with the commit
+// diffs API, a page at a time.
+func (z *Azure) ChangedFiles(base, head string) ([]string, error) {
+	var files []string
+	for skip := 0; ; {
+		var d struct {
+			AllChangesIncluded bool `json:"allChangesIncluded"`
+			Changes            []struct {
+				Item struct {
+					Path string `json:"path"`
+				} `json:"item"`
+				SourceServerItem string `json:"sourceServerItem"` // a rename's old path
+			} `json:"changes"`
+		}
+		p := z.path("/diffs/commits?baseVersionType=commit&baseVersion=%s&targetVersionType=commit&targetVersion=%s&$top=%d&$skip=%d",
+			url.QueryEscape(base), url.QueryEscape(head), adoDiffPage, skip)
+		if _, err := z.api.Do(http.MethodGet, p, nil, &d); err != nil {
+			return nil, err
+		}
+		for _, c := range d.Changes {
+			files = append(files, strings.TrimPrefix(c.Item.Path, "/"))
+			if c.SourceServerItem != "" {
+				files = append(files, strings.TrimPrefix(c.SourceServerItem, "/"))
+			}
+		}
+		if d.AllChangesIncluded || len(d.Changes) == 0 {
+			return files, nil
+		}
+		if skip += len(d.Changes); skip >= adoDiffMax {
+			return nil, fmt.Errorf("more than %d changes from %s to %s", adoDiffMax, base, head)
+		}
+	}
+}
