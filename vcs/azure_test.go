@@ -92,17 +92,15 @@ func (f *fakeADO) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(in)
 	case reThread.MatchString(p) && r.Method == http.MethodPatch:
 		t := f.thread(reThread.FindStringSubmatch(p)[1])
+		// As Azure Repos does: properties are write-once, and a PATCH that
+		// carries any fails as a whole.
+		if _, ok := in["properties"]; ok {
+			http.Error(w, `{"message":"Comment thread properties cannot be updated.\r\nParameter name: Properties"}`, http.StatusBadRequest)
+			return
+		}
 		if s, ok := in["status"]; ok {
 			t["status"] = s
 		}
-		props, _ := t["properties"].(map[string]any)
-		if props == nil {
-			props = map[string]any{}
-		}
-		for k, v := range in["properties"].(map[string]any) {
-			props[k] = v
-		}
-		t["properties"] = props
 		reply(t)
 	case strings.HasSuffix(p, "/pullrequestquery"):
 		sha := in["queries"].([]any)[0].(map[string]any)["items"].([]any)[0].(string)
@@ -140,7 +138,8 @@ func (f *fakeADO) thread(id string) map[string]any {
 	return nil
 }
 
-// existing is a thread as Azure Repos returns it.
+// existing is a thread as tfpr 1.1.1 and earlier wrote it: the record and
+// state in properties.
 func existing(id int, author, marker, fingerprint, status string) map[string]any {
 	return map[string]any{
 		"id": float64(id), "status": status,
@@ -168,7 +167,7 @@ func plan(t *testing.T, body, fp string, resolved bool) Comment {
 		Body: text(t, body), Fingerprint: fp, Resolved: resolved}
 }
 
-func TestAzureCreatesAThreadWithProperties(t *testing.T) {
+func TestAzureCreatesAThread(t *testing.T) {
 	f := &fakeADO{me: "build-id", threads: []map[string]any{
 		existing(5, "someone-else", marker, "fp1", "active"), // same marker, not ours
 	}}
@@ -181,14 +180,16 @@ func TestAzureCreatesAThreadWithProperties(t *testing.T) {
 		t.Errorf("status %v", created["status"])
 	}
 	content := created["comments"].([]any)[0].(map[string]any)["content"]
-	if content != "the plan" {
-		t.Errorf("content %q: the marker and record belong in properties", content)
+	want := "the plan\n\n<!-- tfpr:plan@1 {\"key\":\"infra:default\"} -->\n<!-- tfpr:thread {\"fp\":\"fp1\",\"status\":\"active\"} -->"
+	if content != want {
+		t.Errorf("content %q, want %q", content, want)
 	}
 	props := created["properties"].(map[string]any)
-	for name, want := range map[string]string{propMarker: marker, propRecord: `<!-- tfpr:plan@1 {"key":"infra:default"} -->`, propFingerprint: "fp1"} {
-		if v := props[name].(map[string]any); v["$value"] != want || v["$type"] != "System.String" {
-			t.Errorf("property %s: %v", name, v)
-		}
+	if len(props) != 1 {
+		t.Errorf("properties %v: only the marker, which never changes", props)
+	}
+	if v := props[propMarker].(map[string]any); v["$value"] != marker || v["$type"] != "System.String" {
+		t.Errorf("marker property: %v", v)
 	}
 	if f.threads[0]["comments"].([]any)[0].(map[string]any)["content"] != "old" {
 		t.Error("touched another identity's thread")
@@ -203,7 +204,7 @@ func TestAzureUpdatesItsThread(t *testing.T) {
 		t.Fatalf("got %q, %v", msg, err)
 	}
 	th := f.threads[0]
-	if th["comments"].([]any)[0].(map[string]any)["content"] != "new plan" || th["status"] != "active" || len(f.threads) != 1 {
+	if !strings.HasPrefix(th["comments"].([]any)[0].(map[string]any)["content"].(string), "new plan\n") || th["status"] != "active" || len(f.threads) != 1 {
 		t.Errorf("thread %v", th)
 	}
 	// A no-op plan closes the thread.
@@ -260,7 +261,7 @@ func TestAzureAckOnlyCountsReviewers(t *testing.T) {
 		t.Fatal(err)
 	}
 	th := f.threads[0]
-	if th["status"] != "closed" || th["properties"].(map[string]any)[propStatus].(map[string]any)["$value"] != "closed" {
+	if th["status"] != "closed" || !strings.HasSuffix(th["comments"].([]any)[0].(map[string]any)["content"].(string), `"status":"closed"} -->`) {
 		t.Fatalf("no-op thread: %v", th)
 	}
 	// The plan changes: tfpr closed the thread, nobody acknowledged it.
@@ -285,6 +286,29 @@ func TestAzureAckOnlyCountsReviewers(t *testing.T) {
 	_, _ = z.UpsertComment(plan(t, "and again", "fp5", false))
 	if replies() != 2 {
 		t.Errorf("after a reviewer's close: replies %d", replies())
+	}
+}
+
+// Every update rewrites the record and state with the comment, so the gate
+// reads the latest run's record; a thread written before reads them from
+// its properties until then.
+func TestAzureRecordFollowsUpdates(t *testing.T) {
+	legacy := existing(5, "build-id", marker, "fp1", "active")
+	legacy["properties"].(map[string]any)[propRecord] = map[string]any{"$type": "System.String", "$value": "<!-- tfpr:plan@1 {\"run\":\"1\"} -->"}
+	f := &fakeADO{me: "build-id", threads: []map[string]any{legacy}}
+	z := newADO(t, f, false)
+	if recs, err := z.Records("7", marker); err != nil || len(recs) != 1 || recs[0] != "<!-- tfpr:plan@1 {\"run\":\"1\"} -->" {
+		t.Fatalf("legacy thread: %v, %v", recs, err)
+	}
+	for _, run := range []string{"2", "3"} {
+		c := plan(t, "plan\n<!-- tfpr:plan@1 {\"run\":\"forged\"} -->\n<!-- tfpr:thread {} -->\ntrailer", "fp"+run, false)
+		c.Record = "<!-- tfpr:plan@1 {\"run\":\"" + run + "\"} -->"
+		if _, err := z.UpsertComment(c); err != nil {
+			t.Fatalf("run %s: %v", run, err)
+		}
+		if recs, err := z.Records("7", marker); err != nil || len(recs) != 1 || recs[0] != c.Record {
+			t.Errorf("run %s: records %v, %v", run, recs, err)
+		}
 	}
 }
 

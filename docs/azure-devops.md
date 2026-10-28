@@ -298,8 +298,10 @@ combine the matrix legs' outputs in a later job:
 - One thread per stack and workspace. tfpr finds its thread by the thread's
   properties (`tfpr.marker`) and updates it only if the build identity wrote
   its first comment. A reviewer can't hijack it by pasting a marker.
-- The properties also carry the record (`tfpr.record`) and the plan
-  fingerprint, so the comment text has no hidden markup.
+- Azure Repos never lets a thread's properties change after it is created,
+  so the record the gate reads and tfpr's own state (the plan fingerprint
+  and the status tfpr last set) are the first comment's last two lines, as
+  HTML comments. Only the comment's author can edit them.
 - Status: a no-op plan's thread is **closed**; any other plan's is
   **active**. With the **Check for comment resolution** policy, reviewers must
   resolve plan threads before the PR completes.

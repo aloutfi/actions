@@ -483,7 +483,8 @@ func (a *app) render() error {
 		return err
 	}
 	// Hosts that hide HTML comments carry the marker and record in the text;
-	// the others (Azure Repos) keep them in thread properties.
+	// Azure Repos keeps the marker in a property and appends the record when
+	// it posts (vcs/azure.go).
 	out := body.String()
 	if a.commentHost().HiddenHTML {
 		out = vcs.Compose(marker, record, body)
