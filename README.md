@@ -6,6 +6,7 @@ actions are thin wrappers around it.
 
 ## Table of contents
 
+*   [Sample comments 👀](#sample-comments-)
 *   [Features 🚀](#features-)
 *   [Usage 💻](#usage-)
     *   [On `pull_request` 🔀](#on-pull_request-)
@@ -23,6 +24,344 @@ actions are thin wrappers around it.
 *   [Versioning 🏷️](#versioning-️)
 *   [Examples 📄](#examples-)
 *   [Development 🛠️](#development-️)
+
+## Sample comments 👀
+
+Real `tfpr` output, rendered from a throwaway stack (the links go nowhere).
+
+<details><summary>🧼 <b>Clean</b>: nothing to do</summary>
+
+### ✅ Terraform plan · `stacks/goldilocks-zone` (`prod`) · No changes
+Commit `3f9c2a1` · [job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · [tfpr v1.1.2](https://github.com/aloutfi/actions/releases/tag/v1.1.2) · [terraform 1.17.1](https://github.com/hashicorp/terraform/releases/tag/v1.17.1) · redaction: none
+
+<details><summary>Plan output for stacks/goldilocks-zone</summary>
+
+```terraform
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+```
+
+</details>
+
+</details>
+
+<details><summary>🧽 <b>Dirty</b>: a few creates, updates and a delete</summary>
+
+### ⚠️ Terraform plan · `stacks/swamp-thing` (`staging`) · 2 to add, 2 to change, 1 to destroy
+Commit `8d41b07` · [job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · [tfpr v1.1.2](https://github.com/aloutfi/actions/releases/tag/v1.1.2) · [terraform 1.17.1](https://github.com/hashicorp/terraform/releases/tag/v1.17.1) · redaction: none
+
+| Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 2 | 1 | 0 | 0 | 0 | 0 | 1 | 0 |
+
+**Resources (5)**
+```diff
+-   terraform_data.dead_soon   delete
+!   terraform_data.oversteer   update
+!   terraform_data.tug_of_war  update
++   random_pet.green_flash     create
++   time_sleep.forty_winks     create
+```
+
+<details><summary>Plan output for stacks/swamp-thing</summary>
+
+```terraform
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+  ~ update in-place
+  - destroy
+
+Terraform will perform the following actions:
+
+  # random_pet.green_flash will be created
+  + resource "random_pet" "green_flash" {
+      + id        = (known after apply)
+      + length    = 2
+      + prefix    = "flare"
+      + separator = "-"
+    }
+
+  # terraform_data.dead_soon will be destroyed
+  # (because terraform_data.dead_soon is not in configuration)
+  - resource "terraform_data" "dead_soon" {
+      - id     = "8ac14c3e-7b65-ac00-d145-fd14abccae88" -> null
+      - input  = "goner" -> null
+      - output = "goner" -> null
+    }
+
+  # terraform_data.oversteer will be updated in-place
+  ~ resource "terraform_data" "oversteer" {
+        id     = "efcb19c6-944c-9704-4ef1-ff128c96650d"
+      ~ input  = {
+          ~ angle = 0 -> 35
+          ~ grip  = "steady" -> "sideways"
+        }
+      ~ output = {
+          - angle = 0
+          - grip  = "steady"
+        } -> (known after apply)
+    }
+
+  # terraform_data.tug_of_war will be updated in-place
+  ~ resource "terraform_data" "tug_of_war" {
+        id     = "11fe4b31-db3c-e2aa-352e-56ed6f613db5"
+      ~ input  = {
+          ~ left  = 3 -> 4
+          ~ right = 3 -> 2
+        }
+      ~ output = {
+          - left  = 3
+          - right = 3
+        } -> (known after apply)
+    }
+
+  # time_sleep.forty_winks will be created
+  + resource "time_sleep" "forty_winks" {
+      + create_duration = "40s"
+      + id              = (known after apply)
+    }
+
+Plan: 2 to add, 2 to change, 1 to destroy.
+
+Changes to Outputs:
+  + flash  = (known after apply)
+```
+
+</details>
+
+Outputs: `flash` (create)
+
+</details>
+
+<details open><summary>🦨 <b>Filthy</b>: deletes, replaces, a forget, imports, moves, drift and outputs</summary>
+
+### ⚠️ Terraform plan · `stacks/primordial-soup` (`prod`) · 5 to add, 3 to change, 3 to destroy, 3 to replace, 2 to import, 2 to move, 1 to forget
+Commit `c7e5a90` · [job log](https://ci.example/run/1234/job/5678) · [full plan](https://ci.example/run/1234#summary) · [plan.txt](https://ci.example/run/1234/artifacts/plan.txt) · [tfpr v1.1.2](https://github.com/aloutfi/actions/releases/tag/v1.1.2) · [terraform 1.17.1](https://github.com/hashicorp/terraform/releases/tag/v1.17.1) · redaction: none
+
+> **1 resource will be forgotten**: removed from state, not destroyed; it keeps running, unmanaged.
+
+| Add | Change | Destroy | Replace | Import | Move | Forget | Outputs | Drift |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 3 | 3 | 3 | 2 | 2 | 1 | 2 | 1 |
+
+**Resources (18)**
+```diff
+-   terraform_data.dead_soon                   delete
+-   terraform_data.deep_sixing                 delete
+-   terraform_data.ton_of_bricks               delete
+-/+ random_password.screw_loose                replace
+-/+ random_shuffle.table_flipping              replace
+-/+ terraform_data.shatter_box                 replace
+~   terraform_data.sayonara                    forget
+!   terraform_data.life_raft_for_a_death_trip  update, import
+!   terraform_data.oversteer                   update
+!   terraform_data.tug_of_war                  update
+>   random_integer.no_dice                     import
+>   random_pet.tip_hop_2                       move from random_pet.tip_hop
+>   tls_private_key.unlock_the_geometry        move from tls_private_key.lock_the_geometry
++   local_file.adrift_for_days                 create
++   local_file.preparations_for_departure      create
++   terraform_data.launchers["green_flash"]    create
++   terraform_data.launchers["magpie"]         create
++   terraform_data.launchers["pono"]           create
+```
+
+<details><summary>Plan output for stacks/primordial-soup</summary>
+
+```terraform
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+  ~ update in-place
+  - destroy
+-/+ destroy and then create replacement
+
+Terraform will perform the following actions:
+
+  # local_file.adrift_for_days will be created
+  + resource "local_file" "adrift_for_days" {
+      + content              = <<-EOT
+            just as the sun went down
+        EOT
+      + content_base64sha256 = (known after apply)
+      + content_base64sha512 = (known after apply)
+      + content_md5          = (known after apply)
+      + content_sha1         = (known after apply)
+      + content_sha256       = (known after apply)
+      + content_sha512       = (known after apply)
+      + directory_permission = "0777"
+      + file_permission      = "0777"
+      + filename             = "./out/adrift_for_days.txt"
+      + id                   = (known after apply)
+    }
+
+  # local_file.preparations_for_departure will be created
+  + resource "local_file" "preparations_for_departure" {
+      + content              = <<-EOT
+            kites couldn't even
+        EOT
+      + content_base64sha256 = (known after apply)
+      + content_base64sha512 = (known after apply)
+      + content_md5          = (known after apply)
+      + content_sha1         = (known after apply)
+      + content_sha256       = (known after apply)
+      + content_sha512       = (known after apply)
+      + directory_permission = "0777"
+      + file_permission      = "0777"
+      + filename             = "./out/preparations_for_departure.txt"
+      + id                   = (known after apply)
+    }
+
+  # random_integer.no_dice will be imported
+    resource "random_integer" "no_dice" {
+        id     = "4"
+        max    = 6
+        min    = 1
+        result = 4
+    }
+
+  # random_password.screw_loose must be replaced
+-/+ resource "random_password" "screw_loose" {
+      ~ bcrypt_hash = (sensitive value)
+      ~ id          = "none" -> (known after apply)
+      ~ length      = 24 -> 32 # forces replacement
+      ~ result      = (sensitive value)
+    }
+
+  # random_pet.tip_hop has moved to random_pet.tip_hop_2
+    resource "random_pet" "tip_hop_2" {
+        id        = "uncommon-mouse"
+    }
+
+  # random_shuffle.table_flipping must be replaced
+-/+ resource "random_shuffle" "table_flipping" {
+      ~ id     = "-" -> (known after apply)
+      ~ input  = [ # forces replacement
+            "spunion",
+          + "gulch",
+        ]
+      ~ result = [
+          - "scabbler",
+          - "spunion",
+          - "jook",
+          - "higgins",
+        ] -> (known after apply)
+    }
+
+  # terraform_data.dead_soon will be destroyed
+  # (because terraform_data.dead_soon is not in configuration)
+  - resource "terraform_data" "dead_soon" {
+      - id     = "8ac14c3e-7b65-ac00-d145-fd14abccae88" -> null
+      - input  = "goner" -> null
+      - output = "goner" -> null
+    }
+
+  # terraform_data.deep_sixing will be destroyed
+  # (because terraform_data.deep_sixing is not in configuration)
+  - resource "terraform_data" "deep_sixing" {
+      - id     = "5ae45850-de5e-1b5f-da69-46cd65f3bd96" -> null
+      - input  = "trenched" -> null
+      - output = "trenched" -> null
+    }
+
+  # terraform_data.launchers["green_flash"] will be created
+  + resource "terraform_data" "launchers" {
+      + id     = (known after apply)
+      + input  = "green_flash"
+      + output = (known after apply)
+    }
+
+  # terraform_data.launchers["magpie"] will be created
+  + resource "terraform_data" "launchers" {
+      + id     = (known after apply)
+      + input  = "magpie"
+      + output = (known after apply)
+    }
+
+  # terraform_data.launchers["pono"] will be created
+  + resource "terraform_data" "launchers" {
+      + id     = (known after apply)
+      + input  = "pono"
+      + output = (known after apply)
+    }
+
+  # terraform_data.life_raft_for_a_death_trip will be updated in-place
+  # (imported from "8a4c7e2f-0b1d-4c3e-9f5a-6d7e8f9a0b1c")
+  ~ resource "terraform_data" "life_raft_for_a_death_trip" {
+        id     = "8a4c7e2f-0b1d-4c3e-9f5a-6d7e8f9a0b1c"
+      + input  = "the re-up"
+      + output = (known after apply)
+    }
+
+  # terraform_data.oversteer will be updated in-place
+  ~ resource "terraform_data" "oversteer" {
+        id     = "efcb19c6-944c-9704-4ef1-ff128c96650d"
+      ~ input  = {
+          ~ angle = 0 -> 35
+          ~ grip  = "steady" -> "sideways"
+        }
+      ~ output = {
+          - angle = 0
+          - grip  = "steady"
+        } -> (known after apply)
+    }
+
+ # terraform_data.sayonara will no longer be managed by Terraform, but will not be destroyed
+ # (destroy = false is set in the configuration)
+ . resource "terraform_data" "sayonara" {
+        id     = "b42e3296-bc39-170d-1f21-64924a972152"
+    }
+
+  # terraform_data.shatter_box must be replaced
+-/+ resource "terraform_data" "shatter_box" {
+      ~ id               = "e82d0ecc-e87f-816a-201b-961d146aac1e" -> (known after apply)
+      ~ triggers_replace = "v1" -> "v2"
+    }
+
+  # terraform_data.ton_of_bricks will be destroyed
+  # (because terraform_data.ton_of_bricks is not in configuration)
+  - resource "terraform_data" "ton_of_bricks" {
+      - id     = "ad1bba0f-bb07-f726-87b8-1fc268cdcef9" -> null
+      - input  = "heavy" -> null
+      - output = "heavy" -> null
+    }
+
+  # terraform_data.tug_of_war will be updated in-place
+  ~ resource "terraform_data" "tug_of_war" {
+        id     = "11fe4b31-db3c-e2aa-352e-56ed6f613db5"
+      ~ input  = {
+          ~ left  = 3 -> 5
+          ~ right = 3 -> 1
+        }
+      ~ output = {
+          - left  = 3
+          - right = 3
+        } -> (known after apply)
+    }
+
+  # tls_private_key.lock_the_geometry has moved to tls_private_key.unlock_the_geometry
+    resource "tls_private_key" "unlock_the_geometry" {
+        id                            = "b767525c6d8772bfa7c065f61aa5d28f6770cfca"
+    }
+
+Plan: 2 to import, 8 to add, 3 to change, 6 to destroy.
+
+Changes to Outputs:
+  + departure = "./out/preparations_for_departure.txt"
+  ~ roll      = 3 -> 4
+```
+
+</details>
+
+Outputs: `departure` (create), `roll` (update)
+
+</details>
 
 ## Features 🚀
 
